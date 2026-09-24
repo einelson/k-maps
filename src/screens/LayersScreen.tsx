@@ -1,7 +1,11 @@
 import { ScrollView, StyleSheet, Switch, Text, View, Pressable } from 'react-native';
 
 import type { BaseMapMode } from '../map/usgsSources';
+import { POI_CATEGORY_META, type PoiCategory } from '../map/poiSources';
 import { useLayersStore, type OverlayLayerId } from '../state/useLayersStore';
+import { usePoiStore } from '../state/usePoiStore';
+
+const POI_CATEGORIES = Object.keys(POI_CATEGORY_META) as PoiCategory[];
 
 const BASE_MAPS: { id: BaseMapMode; label: string }[] = [
   { id: 'topo', label: 'Topo' },
@@ -24,6 +28,8 @@ export function LayersScreen() {
   const overlayOpacity = useLayersStore((s) => s.overlayOpacity);
   const setOverlayVisible = useLayersStore((s) => s.setOverlayVisible);
   const setOverlayOpacity = useLayersStore((s) => s.setOverlayOpacity);
+  const poiVisibility = usePoiStore((s) => s.visibility);
+  const setPoiVisible = usePoiStore((s) => s.setVisible);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -83,6 +89,24 @@ export function LayersScreen() {
         </View>
       ))}
 
+      <Text style={styles.sectionTitle}>Points of interest</Text>
+      {POI_CATEGORIES.map((category) => (
+        <View key={category} style={styles.overlayRow}>
+          <View style={styles.overlayHeader}>
+            <View style={[styles.poiDot, { backgroundColor: POI_CATEGORY_META[category].color }]} />
+            <Text style={styles.overlayLabel}>{POI_CATEGORY_META[category].label}</Text>
+            <Switch
+              value={poiVisibility[category]}
+              onValueChange={(v) => setPoiVisible(category, v)}
+            />
+          </View>
+        </View>
+      ))}
+      <Text style={styles.poiSourceNote}>
+        Pre-loaded from OpenStreetMap (© OpenStreetMap contributors) for the southwest Idaho
+        starter region — not your own pins.
+      </Text>
+
       <Text style={styles.legendNote}>
         Public land legend: green = open, amber (dashed) = restricted, red = closed, blue-gray =
         unknown access. Unshaded areas are not in public-land data — likely private (inferred),
@@ -108,8 +132,10 @@ const styles = StyleSheet.create({
   baseMapButtonText: { fontWeight: '600' },
   baseMapButtonTextActive: { color: 'white' },
   overlayRow: { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#ddd' },
-  overlayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  overlayLabel: { fontSize: 15 },
+  overlayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  overlayLabel: { fontSize: 15, flex: 1 },
+  poiDot: { width: 10, height: 10, borderRadius: 5 },
+  poiSourceNote: { marginTop: 4, fontSize: 12, color: '#888' },
   opacityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
   opacityLabel: { flex: 1, color: '#666' },
   opacityButton: {

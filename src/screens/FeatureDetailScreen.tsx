@@ -6,17 +6,28 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import { deleteFeature } from '../data/featuresRepo';
 import type { Feature } from '../data/types';
+import { openDirections } from '../features/directions';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 
-/** GeoJSON coordinates are [lon, lat]; format as decimal degrees for now (§7.3 wants DMS/UTM too). */
-function formatCoordinates(geometry: string): string {
+/** GeoJSON coordinates are [lon, lat]; returns null for non-point geometry (or a Directions button doesn't apply). */
+function parsePointLonLat(geometry: string): [number, number] | null {
   try {
     const parsed = JSON.parse(geometry) as { type: string; coordinates: unknown };
-    if (parsed.type === 'Point') {
-      const [lon, lat] = parsed.coordinates as [number, number];
-      return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-    }
-    return parsed.type;
+    return parsed.type === 'Point' ? (parsed.coordinates as [number, number]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Decimal degrees for now (§7.3 wants DMS/UTM too). */
+function formatCoordinates(geometry: string): string {
+  const point = parsePointLonLat(geometry);
+  if (point) {
+    const [lon, lat] = point;
+    return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  }
+  try {
+    return (JSON.parse(geometry) as { type: string }).type;
   } catch {
     return 'Unknown geometry';
   }
@@ -97,6 +108,21 @@ export function FeatureDetailScreen() {
       <Text style={styles.label}>Type</Text>
       <Text style={styles.readonlyValue}>{feature.type}</Text>
 
+      {feature.type === 'point' &&
+        (() => {
+          const point = parsePointLonLat(feature.geometry);
+          if (!point) return null;
+          const [lon, lat] = point;
+          return (
+            <Pressable
+              style={styles.directionsButton}
+              onPress={() => openDirections(lat, lon, feature.name)}
+            >
+              <Text style={styles.directionsButtonText}>Get Directions</Text>
+            </Pressable>
+          );
+        })()}
+
       <Pressable style={styles.saveButton} onPress={save}>
         <Text style={styles.saveButtonText}>Save</Text>
       </Pressable>
@@ -128,6 +154,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   saveButtonText: { color: 'white', fontWeight: '700' },
+  directionsButton: {
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#2f6f4f',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  directionsButtonText: { color: '#2f6f4f', fontWeight: '700' },
   deleteButton: { marginTop: 12, paddingVertical: 12, alignItems: 'center' },
   deleteButtonText: { color: '#c0392b', fontWeight: '600' },
 });

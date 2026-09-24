@@ -19,6 +19,11 @@ Scaffolded per the spec's Phase 0/1 targets. Implemented so far:
   downloader (§4) — **written but not yet exercised on a device**
 - All seven screens from §8, wired together in navigation
 - Laptop-side pipeline scripts for PAD-US → MBTiles and OSM (Protomaps) extraction (§6.2)
+- Pre-built POI pins for boat launches and campsites/trailheads (not in the original spec — added
+  by request), pulled from OSM via Overpass for one starter bbox (`tools/fetch_pois.mjs`), with
+  independent show/hide toggles in the Layers sheet and a tap card with a "Get Directions" button
+  that hands off to the phone's own maps app (`geo:` intent on Android, Apple Maps on iOS). Same
+  Directions button on point features in the item editor.
 
 Not yet done, in rough roadmap order:
 
