@@ -1,25 +1,43 @@
 {
   "expo": {
-    "name": "k-maps",
+    "name": "K-Maps",
     "slug": "k-maps",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "kmaps",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ethannelson.kmaps",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "K-Maps shows your position on the map and records GPS tracks when you ask it to.",
+        "UIBackgroundModes": []
+      }
     },
     "android": {
+      "package": "com.ethannelson.kmaps",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "@maplibre/maplibre-react-native",
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "K-Maps shows your position on the map and records GPS tracks when you ask it to."
+        }
+      ]
+    ]
   }
 }

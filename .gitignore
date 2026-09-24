@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# generated map data (built by /tools scripts, hosted separately — see packs/README.md)
+/packs/*.mbtiles
+/packs/*.pmtiles
+/packs/*.geojsonl
+
+# tile packs downloaded on-device
+/maps/

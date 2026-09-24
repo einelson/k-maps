@@ -1,0 +1,13 @@
+{
+  "packs": [
+    {
+      "id": "land_id",
+      "layer": "land",
+      "name": "Idaho public land",
+      "version": "padus-4.1",
+      "bytes": 0,
+      "url": "https://example.com/packs/land_id.mbtiles",
+      "bbox": [-117.3, 41.9, -111.0, 49.0]
+    }
+  ]
+}

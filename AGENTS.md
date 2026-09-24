@@ -1,4 +1,8 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is an Expo/React Native mobile application (K-Maps: offline outdoor maps). Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+
+**Read `docs/SPEC.md` before making architectural changes** — it's the full design spec (data sources, storage layout, offline downloader design, screens, roadmap) this project was scaffolded from. `README.md` tracks what's actually built versus that spec.
+
+`@maplibre/maplibre-react-native` component names/props change across major versions (spec §12.8) — this project pins v11's `Map`/`Camera`/`RasterSource`/`Layer` API (not the older `MapView`/`RasterLayer` names). Check `node_modules/@maplibre/maplibre-react-native/src/index.ts` for the installed version's actual exports before assuming an API shape.
 
 ## Expo has changed — do not trust your training data
 
@@ -25,9 +29,14 @@ Run lint and typecheck before declaring any task done.
 
 ## Navigation & Routing
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- This project uses **React Navigation** (`@react-navigation/native-stack`), not Expo Router —
+  a deliberate choice from the design spec (`docs/SPEC.md` §3), not the Expo template default.
+  Do not migrate to Expo Router without checking with the user first.
+- The navigator and its `RootStackParamList` live in `src/navigation/RootNavigator.tsx`. Screens
+  live in `src/screens/`, one file per screen from `docs/SPEC.md` §8.
+- Import `useNavigation`, `useRoute` from `@react-navigation/native`; type them with
+  `RootStackParamList` from `src/navigation/RootNavigator.tsx`.
+- Docs: https://reactnavigation.org/docs/getting-started
 
 ## Building with EAS
 
