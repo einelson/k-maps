@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import { Pressable, ScrollView, StyleSheet } from 'react-native';
+
+import { Text, useThemedStyles, type ThemeColors } from '../../theme';
+import { BottomSheet } from './BottomSheet';
 
 interface PickerModalProps<T> {
   visible: boolean;
@@ -21,33 +24,30 @@ export function PickerModal<T>({
   onSelect,
   onClose,
 }: PickerModalProps<T>) {
+  const styles = useThemedStyles(makeStyles);
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.title}>{title}</Text>
-          <ScrollView style={styles.list}>
-            {items.map((item) => (
-              <Pressable key={keyExtractor(item)} style={styles.row} onPress={() => onSelect(item)}>
-                {renderLabel(item)}
-              </Pressable>
-            ))}
-          </ScrollView>
-          <Pressable style={styles.cancelButton} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
+    <BottomSheet visible={visible} onClose={onClose}>
+      <Text style={styles.title}>{title}</Text>
+      <ScrollView style={styles.list}>
+        {items.map((item) => (
+          <Pressable key={keyExtractor(item)} style={styles.row} onPress={() => onSelect(item)}>
+            {renderLabel(item)}
           </Pressable>
-        </Pressable>
+        ))}
+      </ScrollView>
+      <Pressable style={styles.cancelButton} onPress={onClose}>
+        <Text style={styles.cancelText}>Cancel</Text>
       </Pressable>
-    </Modal>
+    </BottomSheet>
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: 'white', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, maxHeight: '70%' },
-  title: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  list: { flexGrow: 0 },
-  row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#eee' },
-  cancelButton: { paddingVertical: 14, alignItems: 'center' },
-  cancelText: { color: '#c0392b', fontWeight: '600' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    title: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
+    list: { flexGrow: 0 },
+    row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: c.divider },
+    cancelButton: { paddingVertical: 14, alignItems: 'center' },
+    cancelText: { color: c.danger, fontWeight: '600' },
+  });

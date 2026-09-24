@@ -1,5 +1,5 @@
 {
-  "source": "USGS PAD-US via USDOT ArcGIS mirror (geo.dot.gov)",
+  "source": "USGS PAD-US (federal via USDOT mirror; state/local via USGS PAD-US 4.1 service)",
   "serviceUrl": "https://geo.dot.gov/server/rest/services/FLMA/PADUS/MapServer",
   "agencies": [
     "PADUS_BLM",
@@ -9,14 +9,35 @@
     "PADUS_BOR",
     "PADUS_USFS"
   ],
+  "nonFederal": {
+    "serviceUrl": "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Manager_Type_PADUS/FeatureServer/0",
+    "managerTypes": [
+      "STAT",
+      "LOC",
+      "DIST",
+      "JNT"
+    ]
+  },
   "bbox": [
-    -117,
-    43,
-    -115.5,
-    44.2
+    -117.0703125,
+    42.811521745097885,
+    -115.3125,
+    44.33956524809714
   ],
-  "featureCount": 63,
-  "fetchedAt": "2026-09-24T02:52:31.623Z",
+  "cellRect": {
+    "cxMin": 179,
+    "cxMax": 183,
+    "cyMin": 371,
+    "cyMax": 376
+  },
+  "featureCount": 700,
+  "kinds": {
+    "public": 700,
+    "outline": 4,
+    "private": 886
+  },
+  "fetchedAt": "2026-09-24T19:02:36.424Z",
+  "pubAccessVintage": "PAD-US 4.1 (USGS, March 2025)",
   "license": "Public domain (USGS)",
-  "note": "Federal land-management agencies only (BLM/FWS/NPS/USACE/BOR/USFS) — not full PAD-US (state/local/private-protected land excluded). See spec §6.5."
+  "note": "Federal agencies (BLM/FWS/NPS/USACE/BOR/USFS) plus state/local/district/joint public land from PAD-US 4.1. Private and NGO conservation land excluded; tribal land not included. Features carry kind: public (polygon), outline (public outlines with clip-edge segments removed) or private (inferred: region minus public land, slivers dropped). See spec §6.5."
 }

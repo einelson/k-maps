@@ -1,0 +1,28 @@
+{
+  "source": "USFS Enterprise Data Warehouse — Motor Vehicle Use Map (Roads + Trails)",
+  "serviceUrl": "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_01/MapServer",
+  "bbox": [
+    -117.0703125,
+    42.811521745097885,
+    -115.3125,
+    44.33956524809714
+  ],
+  "cellRect": {
+    "cxMin": 179,
+    "cxMax": 183,
+    "cyMin": 371,
+    "cyMax": 376
+  },
+  "featureCount": 1227,
+  "kinds": {
+    "road": 967,
+    "trail": 260
+  },
+  "vehicleClasses": {
+    "highClearance": 830,
+    "passenger": 133,
+    "offroad": 264
+  },
+  "fetchedAt": "2026-09-24T19:01:14.678Z",
+  "license": "Public domain (USFS)"
+}

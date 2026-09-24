@@ -360,7 +360,7 @@ Record a breadcrumb line with `expo-location`, save as a `line` with `source='tr
 4. **Items**: list by folder, search, multi-select (move, recolor, tag, delete, export)
 5. **Feature detail/editor**: name, notes, photos, folder, color, icon, tags, coordinates
 6. **Import/Export and backup**
-7. **Settings**: units (imperial/metric), coordinate format, default zoom limits, attribution and data-vintage info
+7. **Settings**: units (imperial/metric), coordinate format, appearance (system/light/dark), default zoom limits, attribution and data-vintage info
 
 ---
 

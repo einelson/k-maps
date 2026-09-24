@@ -114,6 +114,7 @@ export async function mbtilesByteSize(layer: LayerId): Promise<number> {
  * unverified in *this* app on-device — §12.4 in the spec.
  */
 export function localRasterTileUrl(layer: LayerId): string {
-  const fileUri = `${MAPS_DIRECTORY.uri}/${mbtilesFileName(layer)}`;
+  // expo-file-system's `Directory.uri` may or may not end in "/" depending on platform.
+  const fileUri = `${MAPS_DIRECTORY.uri.replace(/\/+$/, '')}/${mbtilesFileName(layer)}`;
   return `${fileUri.replace(/^file:\/\//, 'mbtiles://')}/{z}/{x}/{y}`;
 }

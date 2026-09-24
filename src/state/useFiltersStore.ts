@@ -19,6 +19,9 @@ interface FiltersState {
   deletePreset: (id: string) => void;
 }
 
+/** Keeps ids unique when two are saved in the same millisecond. */
+let presetSeq = 0;
+
 export const useFiltersStore = create<FiltersState>((set, get) => ({
   filters: EMPTY_FILTERS,
   setFilters: (filters) => set({ filters }),
@@ -27,7 +30,7 @@ export const useFiltersStore = create<FiltersState>((set, get) => ({
   presets: [],
   savePreset: (name) =>
     set((s) => ({
-      presets: [...s.presets, { id: String(Date.now()), name, filters: get().filters }],
+      presets: [...s.presets, { id: `${Date.now()}-${++presetSeq}`, name, filters: get().filters }],
     })),
   applyPreset: (id) => {
     const preset = get().presets.find((p) => p.id === id);

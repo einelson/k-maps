@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "scheme": "kmaps",
     "ios": {
       "supportsTablet": true,
@@ -41,7 +41,15 @@
           "locationWhenInUsePermission": "K-Maps shows your position on the map and records GPS tracks when you ask it to."
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "K-Maps lets you attach photos from your library to pins, lines and areas.",
+          "cameraPermission": "K-Maps lets you take photos to attach to pins, lines and areas.",
+          "microphonePermission": false
+        }
+      ]
     ]
   }
 }

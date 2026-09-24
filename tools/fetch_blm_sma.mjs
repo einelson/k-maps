@@ -3,19 +3,19 @@
  * Pulls the BLM "Private or Unknown" surface-management layer — the
  * second-opinion cross-check on "not public" the spec calls out in §2
  * ("One BLM service variant includes Private and Unknown classes"). Not the
- * full agency-by-agency SMA layer, since PAD-US (tools/fetch_land.mjs)
+ * full agency-by-agency SMA layer, since PAD-US (src/packs/land.ts, tools/build_starter_pack.mjs)
  * already covers the federal-agency side; this fills the specific gap
  * PAD-US doesn't cover.
  *
  * This service returns each intersecting feature's FULL (unclipped)
- * geometry same as PAD-US (see tools/fetch_land.mjs), but its geometries
+ * geometry same as PAD-US (see src/packs/land.ts), but its geometries
  * are dense enough that an unsimplified query 500s or returns tens of MB
  * for a small bbox — `maxAllowableOffset` (server-side line simplification,
  * in output SR units — degrees here) is required to get a response at all.
  * ~0.0005° (~50 m) is a display-only simplification, not survey-grade.
  *
  * Usage: node tools/fetch_blm_sma.mjs [west south east north]
- * Default bbox: see tools/region.mjs.
+ * Default bbox: the cell-aligned bundled region, see tools/region.mjs / src/packs/region.ts.
  */
 
 import { bboxClip } from '@turf/turf';

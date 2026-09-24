@@ -1,34 +1,24 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, TextInput, View, Pressable } from 'react-native';
+import { ScrollView, StyleSheet, Switch, View, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BASE_MAPS, groupedOverlays } from '../map/layerOptions';
 import { PUBLIC_LAND_META } from '../map/landSource';
-import type { BaseMapMode } from '../map/usgsSources';
+import { MVUM_META } from '../map/mvumSource';
 import { POI_CATEGORY_META, type PoiCategory } from '../map/poiSources';
-import { useLayersStore, type OverlayLayerId } from '../state/useLayersStore';
+import { formatAge } from '../map/wildfireSource';
+import { useLayersStore } from '../state/useLayersStore';
 import { usePoiStore } from '../state/usePoiStore';
 import { useSavedViewsStore } from '../state/useSavedViewsStore';
+import { useWildfireStore } from '../state/useWildfireStore';
+import { Text, TextInput, useThemedStyles, type ThemeColors } from '../theme';
 
 const POI_CATEGORIES = Object.keys(POI_CATEGORY_META) as PoiCategory[];
-
-const BASE_MAPS: { id: BaseMapMode; label: string }[] = [
-  { id: 'topo', label: 'Topo' },
-  { id: 'satellite', label: 'Satellite' },
-  { id: 'hybrid', label: 'Hybrid' },
-];
-
-const OVERLAYS: { id: OverlayLayerId; label: string; note?: string }[] = [
-  { id: 'land', label: 'Public land' },
-  { id: 'shadedRelief', label: 'Shaded relief' },
-  { id: 'osm', label: 'Roads & trails (OSM)' },
-  { id: 'mvum', label: 'MVUM forest roads', note: 'Not implemented yet — no data source wired up.' },
-  {
-    id: 'blmSma',
-    label: 'BLM cross-check (private/unknown)',
-    note: 'Second opinion on "not public" from BLM, not a parcel-level ownership record.',
-  },
-];
+const GROUPS = groupedOverlays();
 
 export function LayersScreen() {
+  const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const baseMap = useLayersStore((s) => s.baseMap);
   const setBaseMap = useLayersStore((s) => s.setBaseMap);
   const overlayVisibility = useLayersStore((s) => s.overlayVisibility);
@@ -37,8 +27,15 @@ export function LayersScreen() {
   const setOverlayOpacity = useLayersStore((s) => s.setOverlayOpacity);
   const poiVisibility = usePoiStore((s) => s.visibility);
   const setPoiVisible = usePoiStore((s) => s.setVisible);
+  const showLabels = useLayersStore((s) => s.showLabels);
+  const setShowLabels = useLayersStore((s) => s.setShowLabels);
   const useOfflineMaps = useLayersStore((s) => s.useOfflineMaps);
   const setUseOfflineMaps = useLayersStore((s) => s.setUseOfflineMaps);
+  const autoLoadOverlays = useLayersStore((s) => s.autoLoadOverlays);
+  const setAutoLoadOverlays = useLayersStore((s) => s.setAutoLoadOverlays);
+  const wildfireFetchedAt = useWildfireStore((s) => s.fetchedAt);
+  const wildfireStatus = useWildfireStore((s) => s.status);
+  const wildfireError = useWildfireStore((s) => s.error);
   const savedViews = useSavedViewsStore((s) => s.views);
   const saveCurrentAsView = useSavedViewsStore((s) => s.saveCurrentAsView);
   const applyView = useSavedViewsStore((s) => s.applyView);
@@ -46,7 +43,10 @@ export function LayersScreen() {
   const [newViewName, setNewViewName] = useState('');
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
+    >
       <Text style={styles.sectionTitle}>Base map</Text>
       <View style={styles.baseMapRow}>
         {BASE_MAPS.map((mode) => (
@@ -79,41 +79,95 @@ export function LayersScreen() {
         </Text>
       </View>
 
-      <Text style={styles.sectionTitle}>Overlays</Text>
-      {OVERLAYS.map((overlay) => (
-        <View key={overlay.id} style={styles.overlayRow}>
-          <View style={styles.overlayHeader}>
-            <Text style={styles.overlayLabel}>{overlay.label}</Text>
-            <Switch
-              value={overlayVisibility[overlay.id]}
-              onValueChange={(v) => setOverlayVisible(overlay.id, v)}
-              disabled={overlay.id === 'mvum'}
-            />
-          </View>
-          {overlay.note && <Text style={styles.poiSourceNote}>{overlay.note}</Text>}
-          {overlayVisibility[overlay.id] && (
-            <View style={styles.opacityRow}>
-              <Text style={styles.opacityLabel}>
-                Opacity {Math.round(overlayOpacity[overlay.id] * 100)}%
-              </Text>
-              <Pressable
-                style={styles.opacityButton}
-                onPress={() =>
-                  setOverlayOpacity(overlay.id, Math.max(0, overlayOpacity[overlay.id] - 0.1))
-                }
-              >
-                <Text>-</Text>
-              </Pressable>
-              <Pressable
-                style={styles.opacityButton}
-                onPress={() =>
-                  setOverlayOpacity(overlay.id, Math.min(1, overlayOpacity[overlay.id] + 0.1))
-                }
-              >
-                <Text>+</Text>
-              </Pressable>
-            </View>
-          )}
+      <View style={styles.overlayRow}>
+        <View style={styles.overlayHeader}>
+          <Text style={styles.overlayLabel}>Name labels</Text>
+          <Switch value={showLabels} onValueChange={setShowLabels} />
+        </View>
+        <Text style={styles.poiSourceNote}>
+          Shows the names of your pins, lines and areas (and road/trail names where downloaded).
+          Drawn from fonts bundled with the app, so they work offline.
+        </Text>
+      </View>
+
+      <View style={styles.overlayRow}>
+        <View style={styles.overlayHeader}>
+          <Text style={styles.overlayLabel}>Load land data as I pan</Text>
+          <Switch value={autoLoadOverlays} onValueChange={setAutoLoadOverlays} />
+        </View>
+        <Text style={styles.poiSourceNote}>
+          While you&rsquo;re online, fetches public land, MVUM roads and USFS trails for the areas you
+          look at (from zoom 10 in) and keeps them on the device, so coverage isn&rsquo;t limited to
+          the southwest Idaho starter region. Anywhere you&rsquo;ve viewed works offline later.
+        </Text>
+      </View>
+
+      {GROUPS.map(({ group, overlays }) => (
+        <View key={group.id}>
+          <Text style={styles.sectionTitle}>{group.label}</Text>
+          <Text style={styles.groupBlurb}>{group.blurb}</Text>
+          {overlays.map((overlay) => {
+            const on = overlayVisibility[overlay.id] && !overlay.disabled;
+            return (
+              <View key={overlay.id} style={styles.overlayRow}>
+                <View style={styles.overlayHeader}>
+                  <Text style={styles.overlayLabel}>{overlay.label}</Text>
+                  {overlay.onlineOnly && <Text style={styles.onlineTag}>online</Text>}
+                  <Switch
+                    value={on}
+                    onValueChange={(v) => setOverlayVisible(overlay.id, v)}
+                    disabled={overlay.disabled}
+                  />
+                </View>
+                {overlay.note && <Text style={styles.poiSourceNote}>{overlay.note}</Text>}
+                {on && overlay.id === 'wildfire' && (
+                  <Text style={styles.statusNote}>
+                    {wildfireFetchedAt === null
+                      ? wildfireStatus === 'error'
+                        ? 'No data yet — could not reach NIFC.'
+                        : 'Loading current perimeters…'
+                      : wildfireStatus === 'error'
+                        ? `Offline? Showing the copy from ${formatAge(wildfireFetchedAt)}.`
+                        : `Updated ${formatAge(wildfireFetchedAt)}.`}
+                    {wildfireStatus === 'error' && wildfireError ? ` (${wildfireError})` : ''}
+                  </Text>
+                )}
+                {on && overlay.legend && (
+                  <View style={styles.legendRow}>
+                    {overlay.legend.map((entry) => (
+                      <View key={entry.label} style={styles.legendItem}>
+                        <View style={[styles.legendSwatch, { backgroundColor: entry.color }]} />
+                        <Text style={styles.legendLabel}>{entry.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {on && (
+                  <View style={styles.opacityRow}>
+                    <Text style={styles.opacityLabel}>
+                      Opacity {Math.round(overlayOpacity[overlay.id] * 100)}%
+                    </Text>
+                    <Pressable
+                      style={styles.opacityButton}
+                      onPress={() =>
+                        setOverlayOpacity(overlay.id, Math.max(0, overlayOpacity[overlay.id] - 0.1))
+                      }
+                    >
+                      <Text>-</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.opacityButton}
+                      onPress={() =>
+                        setOverlayOpacity(overlay.id, Math.min(1, overlayOpacity[overlay.id] + 0.1))
+                      }
+                    >
+                      <Text>+</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            );
+          })}
         </View>
       ))}
 
@@ -131,17 +185,25 @@ export function LayersScreen() {
         </View>
       ))}
       <Text style={styles.poiSourceNote}>
-        Pre-loaded from OpenStreetMap (© OpenStreetMap contributors) for the southwest Idaho
-        starter region — not your own pins.
+        From OpenStreetMap (© OpenStreetMap contributors) — not your own pins. Pre-loaded for the
+        southwest Idaho starter region; download other areas under Downloads → Overlay data.
       </Text>
 
       <Text style={styles.legendNote}>
         Public land legend: green = open access, amber (dashed) = restricted, red = closed,
-        blue-gray = unknown access. Unshaded areas are not in public-land data — likely private
-        (inferred), not verified. Source: {PUBLIC_LAND_META.source}, fetched{' '}
-        {PUBLIC_LAND_META.fetchedAt.slice(0, 10)} — federal agencies only
-        ({PUBLIC_LAND_META.agencies.map((a) => a.replace('PADUS_', '')).join(', ')}), not full
-        PAD-US.
+        blue-gray = unknown access. Purple-tinted areas are not in public-land data — likely
+        private (inferred), not verified; tribal land and land with missing data can be tinted too.
+        Source:{' '}
+        {PUBLIC_LAND_META.source}, fetched {PUBLIC_LAND_META.fetchedAt.slice(0, 10)} — federal (
+        {PUBLIC_LAND_META.agencies.map((a) => a.replace('PADUS_', '')).join(', ')}) plus
+        state/local/district public land. Tap a polygon for its manager and access.
+      </Text>
+
+      <Text style={styles.legendNote}>
+        MVUM legend: green = passenger cars (maintenance level 3+), orange = high-clearance roads
+        (level 2), purple = OHV/motorcycle trails only; dashed = seasonal. Tap a road for its MVUM
+        designation — check the current MVUM for dates before relying on it. Source:{' '}
+        {MVUM_META.source}, fetched {MVUM_META.fetchedAt.slice(0, 10)}.
       </Text>
 
       <Text style={styles.sectionTitle}>Saved views</Text>
@@ -182,61 +244,75 @@ export function LayersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'white' },
-  content: { padding: 16, gap: 8 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', marginTop: 12, marginBottom: 8 },
-  baseMapRow: { flexDirection: 'row', gap: 8 },
-  baseMapButton: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#eee',
-    alignItems: 'center',
-  },
-  baseMapButtonActive: { backgroundColor: '#2f6f4f' },
-  baseMapButtonText: { fontWeight: '600' },
-  baseMapButtonTextActive: { color: 'white' },
-  overlayRow: { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#ddd' },
-  overlayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
-  overlayLabel: { fontSize: 15, flex: 1 },
-  poiDot: { width: 10, height: 10, borderRadius: 5 },
-  poiSourceNote: { marginTop: 4, fontSize: 12, color: '#888' },
-  opacityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
-  opacityLabel: { flex: 1, color: '#666' },
-  opacityButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#eee',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  legendNote: { marginTop: 16, fontSize: 12, color: '#666', lineHeight: 18 },
-  newViewRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  newViewInput: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  newViewButton: {
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: '#2f6f4f',
-  },
-  newViewButtonText: { color: 'white', fontWeight: '700' },
-  savedViewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#eee',
-  },
-  savedViewName: { flex: 1, fontSize: 15 },
-  savedViewAction: { color: '#2f6f4f', fontWeight: '600' },
-  savedViewDelete: { color: '#c0392b' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 8 },
+    sectionTitle: { fontSize: 16, fontWeight: '700', marginTop: 12, marginBottom: 8 },
+    baseMapRow: { flexDirection: 'row', gap: 8 },
+    baseMapButton: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 8,
+      backgroundColor: c.chip,
+      alignItems: 'center',
+    },
+    baseMapButtonActive: { backgroundColor: c.primary },
+    baseMapButtonText: { fontWeight: '600' },
+    baseMapButtonTextActive: { color: c.onPrimary },
+    overlayRow: { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: c.border },
+    overlayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+    overlayLabel: { fontSize: 15, flex: 1 },
+    groupBlurb: { fontSize: 12, color: c.textFaint, marginTop: -4, marginBottom: 4 },
+    onlineTag: { fontSize: 10, color: c.textFaint, textTransform: 'uppercase' },
+    statusNote: { marginTop: 4, fontSize: 12, color: c.textMuted },
+    legendRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 4, marginTop: 8 },
+    legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    legendSwatch: {
+      width: 12,
+      height: 12,
+      borderRadius: 3,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.borderStrong,
+    },
+    legendLabel: { fontSize: 12, color: c.textSecondary },
+    poiDot: { width: 10, height: 10, borderRadius: 5 },
+    poiSourceNote: { marginTop: 4, fontSize: 12, color: c.textFaint },
+    opacityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
+    opacityLabel: { flex: 1, color: c.textMuted },
+    opacityButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: c.chip,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    legendNote: { marginTop: 16, fontSize: 12, color: c.textMuted, lineHeight: 18 },
+    newViewRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+    newViewInput: {
+      flex: 1,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: c.field,
+    },
+    newViewButton: {
+      paddingHorizontal: 14,
+      justifyContent: 'center',
+      borderRadius: 8,
+      backgroundColor: c.primary,
+    },
+    newViewButtonText: { color: c.onPrimary, fontWeight: '700' },
+    savedViewRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: c.divider,
+    },
+    savedViewName: { flex: 1, fontSize: 15 },
+    savedViewAction: { color: c.primaryText, fontWeight: '600' },
+    savedViewDelete: { color: c.danger },
+  });

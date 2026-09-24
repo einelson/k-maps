@@ -19,11 +19,15 @@ export const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 export const USGS_TILE_SIZE = 256;
 
 /**
- * The topo cache tops out around z16-17; verify per service via its tile
- * info endpoint (§12.3) and overzoom past this rather than requesting tiles
- * that don't exist.
+ * Probed against the live services (§12.3) — the tile-info endpoints claim
+ * levels up to 23, but real tiles stop earlier: topo, imagery and hybrid
+ * return 404 from z17, so MapLibre overzooms z16 beyond this rather than
+ * requesting tiles that don't exist.
  */
 export const USGS_MAX_NATIVE_ZOOM = 16;
+
+/** Shaded relief is coarser: real tiles stop at z13 (404 from z14), same probe as above. */
+export const USGS_SHADED_RELIEF_MAX_ZOOM = 13;
 
 export type BaseMapMode = 'topo' | 'satellite' | 'hybrid';
 

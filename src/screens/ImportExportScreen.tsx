@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { useSQLiteContext } from 'expo-sqlite';
 
@@ -10,6 +11,7 @@ import { createBackup, exportFeatures, importFile } from '../data/importExport';
 import type { ExportFormat } from '../data/importTypes';
 import type { Folder } from '../data/types';
 import { useFiltersStore } from '../state/useFiltersStore';
+import { Text, useThemedStyles, type ThemeColors } from '../theme';
 
 const FORMATS: { id: ExportFormat; label: string }[] = [
   { id: 'gpx', label: 'GPX' },
@@ -19,6 +21,8 @@ const FORMATS: { id: ExportFormat; label: string }[] = [
 
 export function ImportExportScreen() {
   const db = useSQLiteContext();
+  const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const filters = useFiltersStore((s) => s.filters);
   const [format, setFormat] = useState<ExportFormat>('gpx');
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -73,7 +77,10 @@ export function ImportExportScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
+    >
       <Text style={styles.sectionTitle}>Import</Text>
       <Pressable style={styles.button} onPress={handleImport} disabled={busy}>
         <Text style={styles.buttonText}>Import GPX / KML / GeoJSON…</Text>
@@ -144,27 +151,28 @@ export function ImportExportScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'white' },
-  content: { padding: 16, gap: 8 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', marginTop: 16, marginBottom: 4 },
-  subLabel: { fontSize: 12, color: '#888', marginTop: 12, textTransform: 'uppercase' },
-  button: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#f0f0f0' },
-  buttonText: { fontWeight: '600' },
-  formatRow: { flexDirection: 'row', gap: 8 },
-  formatChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: '#eee' },
-  formatChipActive: { backgroundColor: '#2f6f4f' },
-  formatChipText: { fontWeight: '600' },
-  formatChipTextActive: { fontWeight: '600', color: 'white' },
-  emptyNote: { color: '#888', fontSize: 13, marginTop: 4 },
-  folderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#eee',
-  },
-  colorDot: { width: 10, height: 10, borderRadius: 5 },
-  folderName: { fontSize: 15 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 8 },
+    sectionTitle: { fontSize: 15, fontWeight: '700', marginTop: 16, marginBottom: 4 },
+    subLabel: { fontSize: 12, color: c.textFaint, marginTop: 12, textTransform: 'uppercase' },
+    button: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 8, backgroundColor: c.field },
+    buttonText: { fontWeight: '600' },
+    formatRow: { flexDirection: 'row', gap: 8 },
+    formatChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: c.chip },
+    formatChipActive: { backgroundColor: c.primary },
+    formatChipText: { fontWeight: '600' },
+    formatChipTextActive: { fontWeight: '600', color: c.onPrimary },
+    emptyNote: { color: c.textFaint, fontSize: 13, marginTop: 4 },
+    folderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: c.divider,
+    },
+    colorDot: { width: 10, height: 10, borderRadius: 5 },
+    folderName: { fontSize: 15 },
+  });

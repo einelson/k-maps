@@ -18,6 +18,11 @@ export async function openDirections(
       : `geo:${lat},${lon}?q=${lat},${lon}${label ? `(${encodedLabel})` : ''}`;
   const fallback = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
 
-  const canOpen = await Linking.canOpenURL(url).catch(() => false);
-  await Linking.openURL(canOpen ? url : fallback);
+  // Not `canOpenURL` first: on Android 11+ it returns false for `geo:` unless the manifest
+  // declares a matching <queries> intent, which would always send people to the web fallback.
+  try {
+    await Linking.openURL(url);
+  } catch {
+    await Linking.openURL(fallback);
+  }
 }

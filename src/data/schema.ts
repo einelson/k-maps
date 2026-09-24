@@ -3,7 +3,14 @@
  * split into numbered migrations once the schema needs to change on devices
  * that already have data.
  */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+
+/**
+ * v2: `features_fts` (external-content) was only ever written on create, so
+ * renamed/deleted features left stale search entries. Rebuild it from
+ * `features` once for databases created before the fix.
+ */
+export const MIGRATE_V2_SQL = "INSERT INTO features_fts(features_fts) VALUES('rebuild');";
 
 export const CREATE_SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;

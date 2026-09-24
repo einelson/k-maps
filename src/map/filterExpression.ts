@@ -32,3 +32,36 @@ export function buildFeatureFilter(filters: Filters): FilterSpecification {
 
   return ['all', ...clauses] as unknown as FilterSpecification;
 }
+
+/** The feature properties the §7.2 filters look at (a subset of MapFeatureProperties). */
+export interface FilterableProperties {
+  folder_id: number | null;
+  type: string;
+  color: string | null;
+  tag_ids: number[];
+}
+
+/**
+ * JS twin of `buildFeatureFilter`, with identical semantics, for data that
+ * has to be filtered BEFORE it reaches MapLibre. Clustering is the case: a
+ * cluster is computed from the source's raw points, so a layer filter can't
+ * remove a hidden point from a cluster's count — the points source has to be
+ * fed only the visible ones. Still no SQLite round trip; this is an in-memory
+ * pass over the already-loaded features.
+ */
+export function matchesFilters(properties: FilterableProperties, filters: Filters): boolean {
+  if (filters.folderIds) {
+    if (properties.folder_id == null || !filters.folderIds.includes(properties.folder_id)) return false;
+  }
+  if (filters.types && !filters.types.includes(properties.type as never)) return false;
+  if (filters.colors) {
+    if (properties.color == null || !filters.colors.includes(properties.color)) return false;
+  }
+  if (filters.tagIds && filters.tagIds.length > 0) {
+    const has = (id: number) => properties.tag_ids.includes(id);
+    if (filters.tagMode === 'all' ? !filters.tagIds.every(has) : !filters.tagIds.some(has)) {
+      return false;
+    }
+  }
+  return true;
+}

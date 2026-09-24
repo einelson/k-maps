@@ -48,6 +48,28 @@ export function lonLatToCell(lon: number, lat: number): { cx: number; cy: number
   return { cx, cy };
 }
 
+/** Web Mercator only reaches this far; `lonLatToCell` would return NaN/negative rows beyond it. */
+const MAX_MERCATOR_LAT = 85.0511;
+
+/** Every z10 cell a `[west, south, east, north]` view touches (a view crossing the antimeridian isn't handled — US-first, §1). */
+export function cellsInBounds([west, south, east, north]: [number, number, number, number]): {
+  cx: number;
+  cy: number;
+}[] {
+  const clampLat = (lat: number) => Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, lat));
+  const max = (1 << CELL_ZOOM) - 1;
+  const clampCell = (v: number) => Math.max(0, Math.min(max, v));
+  // A bound exactly on a cell edge belongs to the cell on its inside, so nudge the east/south corner in.
+  const EPS = 1e-9;
+  const nw = lonLatToCell(west, clampLat(north));
+  const se = lonLatToCell(east - EPS, clampLat(south + EPS));
+  const cells: { cx: number; cy: number }[] = [];
+  for (let cy = clampCell(nw.cy); cy <= clampCell(se.cy); cy++) {
+    for (let cx = clampCell(nw.cx); cx <= clampCell(se.cx); cx++) cells.push({ cx, cy });
+  }
+  return cells;
+}
+
 /** Lon/lat bounds of a z10 cell, e.g. to draw its outline on the map. */
 export function cellBounds(cx: number, cy: number): [number, number, number, number] {
   const n = 1 << CELL_ZOOM;

@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { CREATE_SCHEMA_SQL, SCHEMA_VERSION } from './schema';
+import { CREATE_SCHEMA_SQL, MIGRATE_V2_SQL, SCHEMA_VERSION } from './schema';
 
 export const DATABASE_NAME = 'kmaps.db';
 
@@ -19,5 +19,6 @@ export async function migrateDbIfNeeded(db: SQLiteDatabase): Promise<void> {
   }
 
   await db.execAsync(CREATE_SCHEMA_SQL);
+  if (currentVersion >= 1 && currentVersion < 2) await db.execAsync(MIGRATE_V2_SQL);
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }

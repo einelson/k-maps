@@ -34,6 +34,9 @@ interface SavedViewsState {
   deleteView: (id: string) => void;
 }
 
+/** Keeps ids unique when two are saved in the same millisecond. */
+let viewSeq = 0;
+
 export const useSavedViewsStore = create<SavedViewsState>((set, get) => ({
   views: [],
 
@@ -48,7 +51,7 @@ export const useSavedViewsStore = create<SavedViewsState>((set, get) => ({
       poiVisibility: poi.visibility,
       filters,
     };
-    set((s) => ({ views: [...s.views, { id: String(Date.now()), name, snapshot }] }));
+    set((s) => ({ views: [...s.views, { id: `${Date.now()}-${++viewSeq}`, name, snapshot }] }));
   },
 
   applyView: (id) => {

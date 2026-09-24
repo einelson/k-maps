@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import type { LayerId } from '../downloads/types';
+import type { PackLayerId } from '../packs/types';
 
 export interface QueuedCell {
   layer: LayerId;
@@ -18,6 +19,10 @@ interface DownloadState {
 
   selectedLayers: LayerId[];
   setSelectedLayers: (layers: LayerId[]) => void;
+
+  /** Vector overlay datasets to fetch per cell (land+likely-private, MVUM, POIs, OSM roads/trails). */
+  selectedPackLayers: PackLayerId[];
+  setSelectedPackLayers: (layers: PackLayerId[]) => void;
 
   maxZoom: number;
   setMaxZoom: (z: number) => void;
@@ -42,6 +47,9 @@ export const useDownloadStore = create<DownloadState>((set) => ({
 
   selectedLayers: ['topo'],
   setSelectedLayers: (layers) => set({ selectedLayers: layers }),
+
+  selectedPackLayers: ['land'],
+  setSelectedPackLayers: (layers) => set({ selectedPackLayers: layers }),
 
   maxZoom: 16,
   setMaxZoom: (z) => set({ maxZoom: z }),

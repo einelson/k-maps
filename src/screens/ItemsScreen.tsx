@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react';
-import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { bulkDelete, bulkSetColor, bulkSetFolder, listFeatures } from '../data/featuresRepo';
@@ -12,6 +13,8 @@ import { exportFeatures } from '../data/importExport';
 import { FEATURE_COLOR_PALETTE } from '../features/colorPalette';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { useFiltersStore } from '../state/useFiltersStore';
+import { Text, TextInput, useThemedStyles, type ThemeColors } from '../theme';
+import { BottomSheet } from './components/BottomSheet';
 import { FolderPickerModal } from './components/FolderPickerModal';
 import { PickerModal } from './components/PickerModal';
 
@@ -29,6 +32,8 @@ type ActiveModal = 'move' | 'color' | 'tag' | null;
 
 export function ItemsScreen() {
   const db = useSQLiteContext();
+  const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const filters = useFiltersStore((s) => s.filters);
   const setFilters = useFiltersStore((s) => s.setFilters);
@@ -175,6 +180,7 @@ export function ItemsScreen() {
       <FlatList
         data={items}
         keyExtractor={(item) => String(item.id)}
+        contentContainerStyle={{ paddingBottom: insets.bottom }}
         ListEmptyComponent={<Text style={styles.empty}>No items yet. Drop a pin on the map.</Text>}
         renderItem={({ item }) => (
           <Pressable
@@ -202,7 +208,7 @@ export function ItemsScreen() {
       />
 
       {selecting && selectedIds.size > 0 && (
-        <View style={styles.actionBar}>
+        <View style={[styles.actionBar, { paddingBottom: 12 + insets.bottom }]}>
           <Pressable style={styles.actionButton} onPress={() => setActiveModal('move')}>
             <Text style={styles.actionButtonText}>Move</Text>
           </Pressable>
@@ -242,121 +248,105 @@ export function ItemsScreen() {
         onSelect={handleRecolor}
         onClose={() => setActiveModal(null)}
       />
-      <Modal
-        visible={activeModal === 'tag'}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setActiveModal(null)}
-      >
-        <Pressable style={styles.backdrop} onPress={() => setActiveModal(null)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.sheetTitle}>Add tag</Text>
-            <View style={styles.newTagRow}>
-              <TextInput
-                style={styles.newTagInput}
-                placeholder="New tag name…"
-                value={newTagName}
-                onChangeText={setNewTagName}
-                onSubmitEditing={() => {
-                  handleCreateTag(newTagName);
-                  setNewTagName('');
-                }}
-              />
-              <Pressable
-                style={styles.newTagButton}
-                onPress={() => {
-                  handleCreateTag(newTagName);
-                  setNewTagName('');
-                }}
-              >
-                <Text style={styles.newTagButtonText}>Add</Text>
-              </Pressable>
-            </View>
-            {tags.map((tag) => (
-              <Pressable key={tag.id} style={styles.sheetRow} onPress={() => handleTag(tag)}>
-                <Text>{tag.name}</Text>
-              </Pressable>
-            ))}
-            <Pressable style={styles.cancelButton} onPress={() => setActiveModal(null)}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
+      <BottomSheet visible={activeModal === 'tag'} onClose={() => setActiveModal(null)}>
+        <Text style={styles.sheetTitle}>Add tag</Text>
+        <View style={styles.newTagRow}>
+          <TextInput
+            style={styles.newTagInput}
+            placeholder="New tag name…"
+            value={newTagName}
+            onChangeText={setNewTagName}
+            onSubmitEditing={() => {
+              handleCreateTag(newTagName);
+              setNewTagName('');
+            }}
+          />
+          <Pressable
+            style={styles.newTagButton}
+            onPress={() => {
+              handleCreateTag(newTagName);
+              setNewTagName('');
+            }}
+          >
+            <Text style={styles.newTagButtonText}>Add</Text>
           </Pressable>
+        </View>
+        {tags.map((tag) => (
+          <Pressable key={tag.id} style={styles.sheetRow} onPress={() => handleTag(tag)}>
+            <Text>{tag.name}</Text>
+          </Pressable>
+        ))}
+        <Pressable style={styles.cancelButton} onPress={() => setActiveModal(null)}>
+          <Text style={styles.cancelText}>Cancel</Text>
         </Pressable>
-      </Modal>
+      </BottomSheet>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'white' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: 12 },
-  search: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  selectToggle: { paddingHorizontal: 10, paddingVertical: 8 },
-  selectToggleText: { color: '#2f6f4f', fontWeight: '700' },
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginHorizontal: 12, marginTop: 10 },
-  tagChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#eee' },
-  tagChipActive: { backgroundColor: '#2f6f4f' },
-  tagChipText: { fontSize: 12, fontWeight: '600' },
-  tagChipTextActive: { fontSize: 12, fontWeight: '600', color: 'white' },
-  empty: { textAlign: 'center', color: '#888', marginTop: 40 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#eee',
-    gap: 12,
-  },
-  checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: '#999' },
-  checkboxChecked: { backgroundColor: '#2f6f4f', borderColor: '#2f6f4f' },
-  colorDot: { width: 12, height: 12, borderRadius: 6 },
-  colorSwatchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rowText: { flex: 1 },
-  rowTitle: { fontSize: 16, fontWeight: '600' },
-  rowSubtitle: { fontSize: 13, color: '#666' },
-  actionBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#ddd',
-    backgroundColor: 'white',
-  },
-  actionButton: { paddingHorizontal: 8, paddingVertical: 6 },
-  actionButtonText: { color: '#2f6f4f', fontWeight: '700' },
-  actionButtonDanger: { color: '#c0392b' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
-    maxHeight: '70%',
-  },
-  sheetTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  sheetRow: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#eee' },
-  newTagRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  newTagInput: {
-    flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  newTagButton: {
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: '#2f6f4f',
-  },
-  newTagButtonText: { color: 'white', fontWeight: '700' },
-  cancelButton: { paddingVertical: 14, alignItems: 'center' },
-  cancelText: { color: '#c0392b', fontWeight: '600' },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: 12 },
+    search: {
+      flex: 1,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: c.field,
+    },
+    selectToggle: { paddingHorizontal: 10, paddingVertical: 8 },
+    selectToggleText: { color: c.primaryText, fontWeight: '700' },
+    tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginHorizontal: 12, marginTop: 10 },
+    tagChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: c.chip },
+    tagChipActive: { backgroundColor: c.primary },
+    tagChipText: { fontSize: 12, fontWeight: '600' },
+    tagChipTextActive: { fontSize: 12, fontWeight: '600', color: c.onPrimary },
+    empty: { textAlign: 'center', color: c.textFaint, marginTop: 40 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: c.divider,
+      gap: 12,
+    },
+    checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, borderColor: c.borderStrong },
+    checkboxChecked: { backgroundColor: c.primary, borderColor: c.primary },
+    colorDot: { width: 12, height: 12, borderRadius: 6 },
+    colorSwatchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    rowText: { flex: 1 },
+    rowTitle: { fontSize: 16, fontWeight: '600' },
+    rowSubtitle: { fontSize: 13, color: c.textMuted },
+    actionBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+    },
+    actionButton: { paddingHorizontal: 8, paddingVertical: 6 },
+    actionButtonText: { color: c.primaryText, fontWeight: '700' },
+    actionButtonDanger: { color: c.danger },
+    sheetTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
+    sheetRow: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: c.divider },
+    newTagRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+    newTagInput: {
+      flex: 1,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: c.field,
+    },
+    newTagButton: {
+      paddingHorizontal: 14,
+      justifyContent: 'center',
+      borderRadius: 8,
+      backgroundColor: c.primary,
+    },
+    newTagButtonText: { color: c.onPrimary, fontWeight: '700' },
+    cancelButton: { paddingVertical: 14, alignItems: 'center' },
+    cancelText: { color: c.danger, fontWeight: '600' },
+  });

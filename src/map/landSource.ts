@@ -1,26 +1,54 @@
-import type { FeatureCollection, MultiPolygon, Polygon } from 'geojson';
+import type { FeatureCollection, LineString, MultiLineString, MultiPolygon, Polygon } from 'geojson';
 
 import publicLandData from '../../assets/land/public-land.json';
 import publicLandMeta from '../../assets/land/public-land.meta.json';
 
 /**
- * Public land layer (spec §6). Bundled as static GeoJSON — same reasoning as
- * src/map/poiSources.ts. Built by tools/fetch_land.mjs from PAD-US via a
- * USDOT ArcGIS mirror, which only covers 6 federal agencies (not full
- * PAD-US); re-run tools/pad_us_to_mbtiles.sh against a real state PAD-US
- * download for full coverage including state/local/private-protected land.
+ * Land layer (spec §6) for the bundled, cell-aligned starter region
+ * (src/packs/region.ts) — the same pack format that `fetchLandPack`
+ * (src/packs/land.ts) downloads per cell on-device. Built by
+ * tools/build_starter_pack.mjs from PAD-US: federal agencies via a USDOT
+ * ArcGIS mirror, plus state/local/district/joint public land from USGS's
+ * PAD-US 4.1 feature service. Private and NGO conservation land is excluded
+ * and tribal land isn't covered.
+ *
+ * One collection, three feature kinds (`properties.kind`):
+ *  - `public`  Polygon|MultiPolygon, colored by `Pub_Access`
+ *  - `outline` LineString|MultiLineString, `Pub_Access` for color (dash `RA`); the segments on the
+ *              region/cell border are removed so adjacent packs draw no grid lines
+ *  - `private` Polygon, "likely private (inferred)": the region minus all public land
  */
-export const PUBLIC_LAND_DATA = publicLandData as FeatureCollection<Polygon | MultiPolygon>;
+export type LandKind = 'public' | 'outline' | 'private';
+export type LandGeometry = Polygon | MultiPolygon | LineString | MultiLineString;
+
+export const PUBLIC_LAND_DATA = publicLandData as FeatureCollection<LandGeometry>;
 export const PUBLIC_LAND_META = publicLandMeta as {
   source: string;
   serviceUrl: string;
   agencies: string[];
+  nonFederal: { serviceUrl: string; managerTypes: string[] };
+  /** [west, south, east, north] of the bundled region (cell-aligned). */
   bbox: [number, number, number, number];
+  cellRect: { cxMin: number; cxMax: number; cyMin: number; cyMax: number };
+  /** Number of `public` polygons (same meaning as before the pack format). */
   featureCount: number;
+  /** Feature counts per `kind`. */
+  kinds: Record<LandKind, number>;
   fetchedAt: string;
+  /** PAD-US release the `Pub_Access` values come from. */
+  pubAccessVintage: string;
   license: string;
   note: string;
 };
+
+/** MapLibre filter (as a plain expression) selecting one land feature kind, e.g. for a Layer's `filter` prop. */
+export function landKindFilter(kind: LandKind) {
+  return ['==', ['get', 'kind'], kind] as unknown as import('@maplibre/maplibre-gl-style-spec').FilterSpecification;
+}
+
+/** Tint for the inferred "likely private" areas (spec §6.4) — deliberately muted, it is an inference, not data. */
+export const LIKELY_PRIVATE_COLOR = '#7c3aed';
+export const LIKELY_PRIVATE_LABEL = 'Likely private (inferred)';
 
 /** PAD-US `Pub_Access` codes (spec §2, §6.3). */
 export type PubAccessCode = 'OA' | 'RA' | 'XA' | 'UK';

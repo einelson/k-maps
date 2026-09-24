@@ -1,0 +1,8 @@
+{
+  "source": "Idaho Department of Fish and Game — Game Management Units",
+  "serviceUrl": "https://services.arcgis.com/FjJI5xHF2dUPVrgK/arcgis/rest/services/GameManagementUnits/FeatureServer/0",
+  "featureCount": 100,
+  "fetchedAt": "2026-09-24T23:37:50.730Z",
+  "license": "Idaho Fish and Game open GIS data (informational; no warranty)",
+  "note": "IDFG calls this a best representation only: confirm unit boundaries in the current IDFG regulation booklet before hunting. Simplified with maxAllowableOffset=0.0003° for size; display only."
+}

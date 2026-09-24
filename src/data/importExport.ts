@@ -102,10 +102,10 @@ export async function importFile(
 
   const baseFolderName = `Imported: ${fileName.replace(/\.[^.]+$/, '')}`;
   const baseFolderId = await createFolder(db, { name: baseFolderName });
-  const folderIdCache = new Map<string, number>([['', baseFolderId]]);
+  const folderIdCache = new Map<string, number>([[JSON.stringify([]), baseFolderId]]);
 
   async function folderIdFor(path: string[]): Promise<number> {
-    const key = path.join('/');
+    const key = JSON.stringify(path); // not path.join('/'): folder "A/B" must not collide with A > B
     const cached = folderIdCache.get(key);
     if (cached != null) return cached;
     const parentId = await folderIdFor(path.slice(0, -1));

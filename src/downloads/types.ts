@@ -1,7 +1,7 @@
 import type { CoverageStatus } from '../data/types';
 
-/** Matches BaseMapMode ('topo'|'satellite'|'hybrid') plus the two vector overlay packs. */
-export type LayerId = 'topo' | 'satellite' | 'hybrid' | 'land' | 'osm';
+/** Matches BaseMapMode ('topo'|'satellite'|'hybrid') plus the vector overlay packs (src/packs/types.ts PackLayerId). */
+export type LayerId = 'topo' | 'satellite' | 'hybrid' | 'land' | 'osm' | 'mvum' | 'trails' | 'poi';
 
 export interface CellSelection {
   cx: number;

@@ -51,7 +51,7 @@ export function featuresToKml(features: Feature[]): string {
  * rather than modeling KML's full schema — same reasoning as src/data/gpx.ts.
  */
 export function parseKml(xml: string): ParsedImportFeature[] {
-  const parser = new XMLParser({ ignoreAttributes: true });
+  const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false, htmlEntities: true });
   const doc = parser.parse(xml);
   const root = doc.kml?.Document ?? doc.kml;
   if (!root) return [];
@@ -96,12 +96,12 @@ function kmlPlacemarkGeometry(placemark: any): Point | LineString | Polygon | nu
 }
 
 function parseKmlCoordinates(raw: string): Position[] {
-  return raw
+  return String(raw)
     .trim()
     .split(/\s+/)
     .map((triplet): Position => {
       const [lon, lat] = triplet.split(',').map(Number);
       return [lon, lat];
     })
-    .filter(([lon, lat]) => !Number.isNaN(lon) && !Number.isNaN(lat));
+    .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
 }

@@ -43,7 +43,14 @@ export function featuresToGpx(features: Feature[]): string {
  * file leans on explicit `any` rather than modeling GPX's full schema.
  */
 export function parseGpx(xml: string): ParsedImportFeature[] {
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    // Keep text as text: with the default, <name>007</name> becomes the number 7 and the
+    // `typeof === 'string'` guards below would silently drop it.
+    parseTagValue: false,
+    htmlEntities: true,
+  });
   const doc = parser.parse(xml);
   const gpx = doc.gpx;
   if (!gpx) return [];

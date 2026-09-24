@@ -1,10 +1,12 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   useSettingsStore,
   type CoordinateFormat,
   type UnitSystem,
 } from '../state/useSettingsStore';
+import { Text, useThemedStyles, type AppearancePreference, type ThemeColors } from '../theme';
 
 function OptionRow<T extends string>({
   label,
@@ -17,6 +19,8 @@ function OptionRow<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  const styles = useThemedStyles(makeStyles);
+
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -24,6 +28,8 @@ function OptionRow<T extends string>({
         {options.map((opt) => (
           <Pressable
             key={opt.id}
+            accessibilityRole="button"
+            accessibilityState={{ selected: value === opt.id }}
             style={[styles.option, value === opt.id && styles.optionActive]}
             onPress={() => onChange(opt.id)}
           >
@@ -38,13 +44,30 @@ function OptionRow<T extends string>({
 }
 
 export function SettingsScreen() {
+  const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const units = useSettingsStore((s) => s.units);
   const setUnits = useSettingsStore((s) => s.setUnits);
   const coordinateFormat = useSettingsStore((s) => s.coordinateFormat);
   const setCoordinateFormat = useSettingsStore((s) => s.setCoordinateFormat);
+  const appearance = useSettingsStore((s) => s.appearance);
+  const setAppearance = useSettingsStore((s) => s.setAppearance);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
+    >
+      <OptionRow<AppearancePreference>
+        label="Appearance"
+        value={appearance}
+        onChange={setAppearance}
+        options={[
+          { id: 'system', label: 'System' },
+          { id: 'light', label: 'Light' },
+          { id: 'dark', label: 'Dark' },
+        ]}
+      />
       <OptionRow<UnitSystem>
         label="Units"
         value={units}
@@ -68,7 +91,8 @@ export function SettingsScreen() {
       <Text style={styles.sectionTitle}>Data sources & attribution</Text>
       <Text style={styles.body}>
         Basemaps: USGS The National Map (public domain). Public land: USGS PAD-US 4.1 (public
-        domain, USGS GAP). Roads/trails/labels: © OpenStreetMap contributors (ODbL), via
+        domain, USGS GAP), plus BLM National SMA (private/unknown cross-check) and USFS Motor Vehicle
+        Use Map (forest roads), both public domain. Roads/trails/labels: © OpenStreetMap contributors (ODbL), via
         Protomaps.
       </Text>
 
@@ -82,16 +106,17 @@ export function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'white' },
-  content: { padding: 16, gap: 8 },
-  row: { marginBottom: 16 },
-  rowLabel: { fontSize: 13, color: '#888', marginBottom: 6, textTransform: 'uppercase' },
-  optionGroup: { flexDirection: 'row', gap: 8 },
-  option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: '#eee' },
-  optionActive: { backgroundColor: '#2f6f4f' },
-  optionText: { fontWeight: '600' },
-  optionTextActive: { color: 'white', fontWeight: '600' },
-  sectionTitle: { fontSize: 15, fontWeight: '700', marginTop: 16 },
-  body: { fontSize: 13, color: '#555', lineHeight: 19, marginTop: 4 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    content: { padding: 16, gap: 8 },
+    row: { marginBottom: 16 },
+    rowLabel: { fontSize: 13, color: c.textFaint, marginBottom: 6, textTransform: 'uppercase' },
+    optionGroup: { flexDirection: 'row', gap: 8 },
+    option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, backgroundColor: c.chip },
+    optionActive: { backgroundColor: c.primary },
+    optionText: { fontWeight: '600' },
+    optionTextActive: { color: c.onPrimary, fontWeight: '600' },
+    sectionTitle: { fontSize: 15, fontWeight: '700', marginTop: 16 },
+    body: { fontSize: 13, color: c.textSecondary, lineHeight: 19, marginTop: 4 },
+  });

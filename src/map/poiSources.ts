@@ -4,10 +4,12 @@ import boatLaunchesData from '../../assets/poi/boat-launches.json';
 import campsitesTrailsData from '../../assets/poi/campsites-trails.json';
 
 /**
- * Pre-built POI pins, bundled as static GeoJSON rather than downloaded or
- * user-drawn. Sourced from OpenStreetMap via Overpass (tools/fetch_pois.mjs)
- * for one starter bbox (Treasure Valley / southwest Idaho) — re-run that
- * script with a different bbox to cover another region.
+ * Pre-built POI pins for the bundled, cell-aligned starter region (Treasure
+ * Valley / southwest Idaho, src/packs/region.ts), in the same pack format
+ * that `fetchPoiPack` (src/packs/poi.ts) downloads per cell on-device:
+ * Point features with `category` ('boatLaunches' | 'campsitesTrails'),
+ * `name` (string | null) and `osm_id`. Sourced from OpenStreetMap via
+ * Overpass by tools/build_starter_pack.mjs.
  */
 export type PoiCategory = 'boatLaunches' | 'campsitesTrails';
 

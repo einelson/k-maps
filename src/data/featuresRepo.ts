@@ -1,8 +1,11 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import type { Geometry } from 'geojson';
+import type { FeatureCollection, Geometry } from 'geojson';
 
 import type { Feature, FeatureType } from './types';
 import { computeGeometryMetrics, geometryTypeToFeatureType } from '../features/measure';
+import { DEFAULT_PIN_COLOR, resolvePinStyle, type PinStyleId } from '../features/pinStyles';
+import { deletePhotosForFeatures } from './photosRepo';
+import { addTagToFeature, getOrCreateTag } from './tagsRepo';
 
 export interface FeatureListFilters {
   folderIds?: number[] | null;
@@ -113,9 +116,63 @@ export async function createFeature(
   return result.lastInsertRowId;
 }
 
+/** `createFeature` plus its tags, creating any tag names that don't exist yet. */
+export async function createFeatureWithTags(
+  db: SQLiteDatabase,
+  input: CreateFeatureInput,
+  tagNames: string[]
+): Promise<number> {
+  const id = await createFeature(db, input);
+  for (const name of tagNames) {
+    await addTagToFeature(db, id, await getOrCreateTag(db, name));
+  }
+  return id;
+}
+
+/**
+ * Replaces a feature's geometry and recomputes the stored bbox/length/area,
+ * exactly as `createFeature` does. `type` is deliberately left unchanged.
+ */
+export async function updateFeatureGeometry(
+  db: SQLiteDatabase,
+  id: number,
+  geometry: Geometry
+): Promise<void> {
+  const metrics = computeGeometryMetrics(geometry);
+  await db.runAsync(
+    `UPDATE features
+        SET geometry = ?, min_lon = ?, min_lat = ?, max_lon = ?, max_lat = ?,
+            length_m = ?, area_m2 = ?, updated_at = ?
+      WHERE id = ?`,
+    JSON.stringify(geometry),
+    metrics.minLon,
+    metrics.minLat,
+    metrics.maxLon,
+    metrics.maxLat,
+    metrics.lengthM,
+    metrics.areaM2,
+    Date.now(),
+    id
+  );
+}
+
+/**
+ * `features_fts` is an external-content FTS5 table (`content='features'`), so
+ * SQLite never keeps it in step with the features table by itself — and a plain
+ * `DELETE FROM features_fts` after the content row is gone can't recover the
+ * tokens to remove. 'rebuild' re-reads the content table, so it's always
+ * correct: call it after anything that renames or deletes a feature.
+ */
+export async function rebuildSearchIndex(db: SQLiteDatabase): Promise<void> {
+  await db.runAsync("INSERT INTO features_fts(features_fts) VALUES('rebuild')");
+}
+
 export async function deleteFeature(db: SQLiteDatabase, id: number): Promise<void> {
+  // Photos and tag links first — foreign keys may be off, so don't rely on ON DELETE CASCADE.
+  await deletePhotosForFeatures(db, [id]);
+  await db.runAsync('DELETE FROM feature_tags WHERE feature_id = ?', id);
   await db.runAsync('DELETE FROM features WHERE id = ?', id);
-  await db.runAsync('DELETE FROM features_fts WHERE rowid = ?', id);
+  await rebuildSearchIndex(db);
 }
 
 export async function bulkSetFolder(
@@ -144,6 +201,94 @@ export async function bulkSetColor(db: SQLiteDatabase, ids: number[], color: str
 
 export async function bulkDelete(db: SQLiteDatabase, ids: number[]): Promise<void> {
   if (ids.length === 0) return;
+  await deletePhotosForFeatures(db, ids);
+  await db.runAsync(`DELETE FROM feature_tags WHERE feature_id IN (${inClause(ids)})`, ...ids);
   await db.runAsync(`DELETE FROM features WHERE id IN (${inClause(ids)})`, ...ids);
-  await db.runAsync(`DELETE FROM features_fts WHERE rowid IN (${inClause(ids)})`, ...ids);
+  await rebuildSearchIndex(db);
+}
+
+/** Properties stamped on each saved feature for the map (filter expressions + tap-to-open read these). */
+export interface MapFeatureProperties {
+  featureId: number;
+  folder_id: number | null;
+  type: FeatureType;
+  name: string | null;
+  /** Raw color — filtered on as-is, so an uncolored feature never matches a color filter. */
+  color: string | null;
+  /** Color to actually paint (falls back to a default per source). */
+  displayColor: string;
+  /** Glyph drawn in the marker for a point (unknown / unset `icon` resolves to the plain pin). */
+  pinStyle: PinStyleId;
+  tag_ids: number[];
+}
+
+export const DEFAULT_FEATURE_COLOR = '#3b82f6';
+export const DEFAULT_TRACK_COLOR = '#c0392b';
+
+/** What an uncolored feature is painted: tracks red-brown, pins red (never the blue location dot), lines/areas blue. */
+function defaultDisplayColor(row: Pick<Feature, 'type' | 'source'>): string {
+  if (row.source === 'track') return DEFAULT_TRACK_COLOR;
+  return row.type === 'point' ? DEFAULT_PIN_COLOR : DEFAULT_FEATURE_COLOR;
+}
+
+export const EMPTY_MAP_FEATURES: FeatureCollection<Geometry, MapFeatureProperties> = {
+  type: 'FeatureCollection',
+  features: [],
+};
+
+/**
+ * Every visible saved feature as one GeoJSON collection (§7.2: "load all
+ * items into one GeoJSON source ... then set the layer filter, so toggling
+ * never round-trips to SQLite"). Features in a hidden folder are left out.
+ * Rows whose stored geometry doesn't parse are skipped rather than failing
+ * the whole map.
+ */
+export async function loadMapFeatures(
+  db: SQLiteDatabase
+): Promise<FeatureCollection<Geometry, MapFeatureProperties>> {
+  const [rows, tagRows] = await Promise.all([
+    db.getAllAsync<
+      Pick<Feature, 'id' | 'folder_id' | 'type' | 'name' | 'color' | 'icon' | 'source' | 'geometry'>
+    >(
+      `SELECT f.id, f.folder_id, f.type, f.name, f.color, f.icon, f.source, f.geometry
+         FROM features f
+         LEFT JOIN folders d ON d.id = f.folder_id
+        WHERE d.id IS NULL OR d.visible IS NULL OR d.visible != 0`
+    ),
+    db.getAllAsync<{ feature_id: number; tag_id: number }>(
+      'SELECT feature_id, tag_id FROM feature_tags'
+    ),
+  ]);
+
+  const tagsByFeature = new Map<number, number[]>();
+  for (const { feature_id, tag_id } of tagRows) {
+    const list = tagsByFeature.get(feature_id);
+    if (list) list.push(tag_id);
+    else tagsByFeature.set(feature_id, [tag_id]);
+  }
+
+  const features: FeatureCollection<Geometry, MapFeatureProperties>['features'] = [];
+  for (const row of rows) {
+    let geometry: Geometry;
+    try {
+      geometry = JSON.parse(row.geometry) as Geometry;
+    } catch {
+      continue;
+    }
+    features.push({
+      type: 'Feature',
+      geometry,
+      properties: {
+        featureId: row.id,
+        folder_id: row.folder_id,
+        type: row.type,
+        name: row.name,
+        color: row.color,
+        displayColor: row.color ?? defaultDisplayColor(row),
+        pinStyle: resolvePinStyle(row.icon),
+        tag_ids: tagsByFeature.get(row.id) ?? [],
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
 }
