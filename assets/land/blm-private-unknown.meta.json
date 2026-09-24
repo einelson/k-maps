@@ -1,0 +1,14 @@
+{
+  "source": "BLM National Surface Management Agency (Private or Unknown layer)",
+  "serviceUrl": "https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/16",
+  "bbox": [
+    -117,
+    43,
+    -115.5,
+    44.2
+  ],
+  "featureCount": 6,
+  "fetchedAt": "2026-09-24T03:08:45.376Z",
+  "license": "Public domain (BLM)",
+  "note": "Cross-check layer only — \"not classified as federal/state/local public land\", not a parcel-level private-ownership claim. Simplified with maxAllowableOffset=0.0005° for size; display only."
+}

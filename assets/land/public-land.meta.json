@@ -1,0 +1,22 @@
+{
+  "source": "USGS PAD-US via USDOT ArcGIS mirror (geo.dot.gov)",
+  "serviceUrl": "https://geo.dot.gov/server/rest/services/FLMA/PADUS/MapServer",
+  "agencies": [
+    "PADUS_BLM",
+    "PADUS_FWS",
+    "PADUS_NPS",
+    "PADUS_USACE",
+    "PADUS_BOR",
+    "PADUS_USFS"
+  ],
+  "bbox": [
+    -117,
+    43,
+    -115.5,
+    44.2
+  ],
+  "featureCount": 63,
+  "fetchedAt": "2026-09-24T02:52:31.623Z",
+  "license": "Public domain (USGS)",
+  "note": "Federal land-management agencies only (BLM/FWS/NPS/USACE/BOR/USFS) — not full PAD-US (state/local/private-protected land excluded). See spec §6.5."
+}

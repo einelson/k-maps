@@ -102,3 +102,18 @@ export async function mbtilesByteSize(layer: LayerId): Promise<number> {
   if (!file || file instanceof Directory) return 0;
   return file.size ?? 0;
 }
+
+/**
+ * Tile URL template for rendering a downloaded MBTiles file directly in a
+ * `RasterSource`'s `tiles` prop — MapLibre Native (both platforms) has a
+ * built-in `mbtiles://` scheme handler that reads a local MBTiles file the
+ * same way it would proxy a remote {z}/{x}/{y} tile server, converting to
+ * the TMS row internally (confirmed pattern: swap a `file://` URI's scheme
+ * for `mbtiles://` and keep the rest of the path — see
+ * https://github.com/maplibre/maplibre-react-native/discussions/591). Still
+ * unverified in *this* app on-device — §12.4 in the spec.
+ */
+export function localRasterTileUrl(layer: LayerId): string {
+  const fileUri = `${MAPS_DIRECTORY.uri}/${mbtilesFileName(layer)}`;
+  return `${fileUri.replace(/^file:\/\//, 'mbtiles://')}/{z}/{x}/{y}`;
+}

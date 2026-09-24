@@ -1,9 +1,12 @@
-import { ScrollView, StyleSheet, Switch, Text, View, Pressable } from 'react-native';
+import { useState } from 'react';
+import { ScrollView, StyleSheet, Switch, Text, TextInput, View, Pressable } from 'react-native';
 
+import { PUBLIC_LAND_META } from '../map/landSource';
 import type { BaseMapMode } from '../map/usgsSources';
 import { POI_CATEGORY_META, type PoiCategory } from '../map/poiSources';
 import { useLayersStore, type OverlayLayerId } from '../state/useLayersStore';
 import { usePoiStore } from '../state/usePoiStore';
+import { useSavedViewsStore } from '../state/useSavedViewsStore';
 
 const POI_CATEGORIES = Object.keys(POI_CATEGORY_META) as PoiCategory[];
 
@@ -13,12 +16,16 @@ const BASE_MAPS: { id: BaseMapMode; label: string }[] = [
   { id: 'hybrid', label: 'Hybrid' },
 ];
 
-const OVERLAYS: { id: OverlayLayerId; label: string }[] = [
+const OVERLAYS: { id: OverlayLayerId; label: string; note?: string }[] = [
   { id: 'land', label: 'Public land' },
   { id: 'shadedRelief', label: 'Shaded relief' },
   { id: 'osm', label: 'Roads & trails (OSM)' },
-  { id: 'mvum', label: 'MVUM forest roads' },
-  { id: 'blmSma', label: 'BLM surface management' },
+  { id: 'mvum', label: 'MVUM forest roads', note: 'Not implemented yet — no data source wired up.' },
+  {
+    id: 'blmSma',
+    label: 'BLM cross-check (private/unknown)',
+    note: 'Second opinion on "not public" from BLM, not a parcel-level ownership record.',
+  },
 ];
 
 export function LayersScreen() {
@@ -30,6 +37,13 @@ export function LayersScreen() {
   const setOverlayOpacity = useLayersStore((s) => s.setOverlayOpacity);
   const poiVisibility = usePoiStore((s) => s.visibility);
   const setPoiVisible = usePoiStore((s) => s.setVisible);
+  const useOfflineMaps = useLayersStore((s) => s.useOfflineMaps);
+  const setUseOfflineMaps = useLayersStore((s) => s.setUseOfflineMaps);
+  const savedViews = useSavedViewsStore((s) => s.views);
+  const saveCurrentAsView = useSavedViewsStore((s) => s.saveCurrentAsView);
+  const applyView = useSavedViewsStore((s) => s.applyView);
+  const deleteView = useSavedViewsStore((s) => s.deleteView);
+  const [newViewName, setNewViewName] = useState('');
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -53,6 +67,18 @@ export function LayersScreen() {
         ))}
       </View>
 
+      <View style={styles.overlayRow}>
+        <View style={styles.overlayHeader}>
+          <Text style={styles.overlayLabel}>Use downloaded maps (offline)</Text>
+          <Switch value={useOfflineMaps} onValueChange={setUseOfflineMaps} />
+        </View>
+        <Text style={styles.poiSourceNote}>
+          Renders the {baseMap} layer from what you&rsquo;ve downloaded on the Downloads screen
+          instead of live tiles — unverified outside the areas/zooms you&rsquo;ve downloaded,
+          since this environment has had no device to test it on yet.
+        </Text>
+      </View>
+
       <Text style={styles.sectionTitle}>Overlays</Text>
       {OVERLAYS.map((overlay) => (
         <View key={overlay.id} style={styles.overlayRow}>
@@ -61,8 +87,10 @@ export function LayersScreen() {
             <Switch
               value={overlayVisibility[overlay.id]}
               onValueChange={(v) => setOverlayVisible(overlay.id, v)}
+              disabled={overlay.id === 'mvum'}
             />
           </View>
+          {overlay.note && <Text style={styles.poiSourceNote}>{overlay.note}</Text>}
           {overlayVisibility[overlay.id] && (
             <View style={styles.opacityRow}>
               <Text style={styles.opacityLabel}>
@@ -108,10 +136,48 @@ export function LayersScreen() {
       </Text>
 
       <Text style={styles.legendNote}>
-        Public land legend: green = open, amber (dashed) = restricted, red = closed, blue-gray =
-        unknown access. Unshaded areas are not in public-land data — likely private (inferred),
-        not verified.
+        Public land legend: green = open access, amber (dashed) = restricted, red = closed,
+        blue-gray = unknown access. Unshaded areas are not in public-land data — likely private
+        (inferred), not verified. Source: {PUBLIC_LAND_META.source}, fetched{' '}
+        {PUBLIC_LAND_META.fetchedAt.slice(0, 10)} — federal agencies only
+        ({PUBLIC_LAND_META.agencies.map((a) => a.replace('PADUS_', '')).join(', ')}), not full
+        PAD-US.
       </Text>
+
+      <Text style={styles.sectionTitle}>Saved views</Text>
+      <Text style={styles.poiSourceNote}>
+        Captures base map, overlays, POI toggles, and the current filter — e.g. &ldquo;Hunt: elk
+        unit&rdquo; = satellite + land + orange pins only (§5.3).
+      </Text>
+      <View style={styles.newViewRow}>
+        <TextInput
+          style={styles.newViewInput}
+          placeholder="Name this view…"
+          value={newViewName}
+          onChangeText={setNewViewName}
+        />
+        <Pressable
+          style={styles.newViewButton}
+          onPress={() => {
+            if (!newViewName.trim()) return;
+            saveCurrentAsView(newViewName.trim());
+            setNewViewName('');
+          }}
+        >
+          <Text style={styles.newViewButtonText}>Save</Text>
+        </Pressable>
+      </View>
+      {savedViews.map((view) => (
+        <View key={view.id} style={styles.savedViewRow}>
+          <Text style={styles.savedViewName}>{view.name}</Text>
+          <Pressable onPress={() => applyView(view.id)}>
+            <Text style={styles.savedViewAction}>Apply</Text>
+          </Pressable>
+          <Pressable onPress={() => deleteView(view.id)}>
+            <Text style={[styles.savedViewAction, styles.savedViewDelete]}>Delete</Text>
+          </Pressable>
+        </View>
+      ))}
     </ScrollView>
   );
 }
@@ -147,4 +213,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   legendNote: { marginTop: 16, fontSize: 12, color: '#666', lineHeight: 18 },
+  newViewRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  newViewInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  newViewButton: {
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#2f6f4f',
+  },
+  newViewButtonText: { color: 'white', fontWeight: '700' },
+  savedViewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#eee',
+  },
+  savedViewName: { flex: 1, fontSize: 15 },
+  savedViewAction: { color: '#2f6f4f', fontWeight: '600' },
+  savedViewDelete: { color: '#c0392b' },
 });

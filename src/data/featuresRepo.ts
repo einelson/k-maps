@@ -8,6 +8,8 @@ export interface FeatureListFilters {
   folderIds?: number[] | null;
   types?: FeatureType[] | null;
   colors?: string[] | null;
+  /** Matches ANY of the given tags — the map's filter expression (src/map/filterExpression.ts) also supports 'all' mode; this SQL path only needs 'any' so far. */
+  tagIds?: number[] | null;
   text?: string;
 }
 
@@ -33,6 +35,12 @@ export async function listFeatures(
   if (filters.colors?.length) {
     clauses.push(`color IN (${inClause(filters.colors)})`);
     params.push(...filters.colors);
+  }
+  if (filters.tagIds?.length) {
+    clauses.push(
+      `id IN (SELECT feature_id FROM feature_tags WHERE tag_id IN (${inClause(filters.tagIds)}))`
+    );
+    params.push(...filters.tagIds);
   }
 
   let sql: string;
@@ -108,4 +116,34 @@ export async function createFeature(
 export async function deleteFeature(db: SQLiteDatabase, id: number): Promise<void> {
   await db.runAsync('DELETE FROM features WHERE id = ?', id);
   await db.runAsync('DELETE FROM features_fts WHERE rowid = ?', id);
+}
+
+export async function bulkSetFolder(
+  db: SQLiteDatabase,
+  ids: number[],
+  folderId: number | null
+): Promise<void> {
+  if (ids.length === 0) return;
+  await db.runAsync(
+    `UPDATE features SET folder_id = ?, updated_at = ? WHERE id IN (${inClause(ids)})`,
+    folderId,
+    Date.now(),
+    ...ids
+  );
+}
+
+export async function bulkSetColor(db: SQLiteDatabase, ids: number[], color: string): Promise<void> {
+  if (ids.length === 0) return;
+  await db.runAsync(
+    `UPDATE features SET color = ?, updated_at = ? WHERE id IN (${inClause(ids)})`,
+    color,
+    Date.now(),
+    ...ids
+  );
+}
+
+export async function bulkDelete(db: SQLiteDatabase, ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  await db.runAsync(`DELETE FROM features WHERE id IN (${inClause(ids)})`, ...ids);
+  await db.runAsync(`DELETE FROM features_fts WHERE rowid IN (${inClause(ids)})`, ...ids);
 }

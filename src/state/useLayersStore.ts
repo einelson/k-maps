@@ -15,6 +15,10 @@ interface LayersState {
 
   showUserLocation: boolean;
   setShowUserLocation: (show: boolean) => void;
+
+  /** Renders the base map from a downloaded MBTiles file instead of live USGS tiles (§4.6). */
+  useOfflineMaps: boolean;
+  setUseOfflineMaps: (use: boolean) => void;
 }
 
 export const useLayersStore = create<LayersState>((set) => ({
@@ -42,4 +46,7 @@ export const useLayersStore = create<LayersState>((set) => ({
 
   showUserLocation: false,
   setShowUserLocation: (show) => set({ showUserLocation: show }),
+
+  useOfflineMaps: false,
+  setUseOfflineMaps: (use) => set({ useOfflineMaps: use }),
 }));

@@ -5,15 +5,14 @@
  * assets. This is a one-off/occasional refresh script, not something the app
  * runs at runtime — re-run it by hand to update the bundled data.
  *
- * Usage: node tools/fetch_pois.mjs [south west north east]
- * Default bbox: Treasure Valley / southwest Idaho, matching the app's
- * default map center (src/map/MapView.tsx).
+ * Usage: node tools/fetch_pois.mjs [west south east north]
+ * Default bbox: see tools/region.mjs.
  */
 
-const [south, west, north, east] = (
-  process.argv.slice(2).length === 4 ? process.argv.slice(2) : [43.0, -117.0, 44.2, -115.5]
-).map(Number);
-const bbox = `${south},${west},${north},${east}`;
+import { bboxOverpass, BBOX_WSEN } from './region.mjs';
+
+const wsen = process.argv.slice(2).length === 4 ? process.argv.slice(2).map(Number) : BBOX_WSEN;
+const bbox = bboxOverpass(wsen);
 
 const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 

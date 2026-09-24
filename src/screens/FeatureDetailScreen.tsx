@@ -1,13 +1,23 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { deleteFeature } from '../data/featuresRepo';
-import type { Feature } from '../data/types';
+import { listFolders } from '../data/foldersRepo';
+import {
+  addTagToFeature,
+  getOrCreateTag,
+  listTags,
+  listTagsForFeature,
+  removeTagFromFeature,
+} from '../data/tagsRepo';
+import type { Feature, Folder, Tag } from '../data/types';
+import { FEATURE_COLOR_PALETTE } from '../features/colorPalette';
 import { openDirections } from '../features/directions';
 import type { RootStackParamList } from '../navigation/RootNavigator';
+import { FolderPickerModal } from './components/FolderPickerModal';
 
 /** GeoJSON coordinates are [lon, lat]; returns null for non-point geometry (or a Directions button doesn't apply). */
 function parsePointLonLat(geometry: string): [number, number] | null {
@@ -42,12 +52,30 @@ export function FeatureDetailScreen() {
   const [feature, setFeature] = useState<Feature | null>(null);
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
+  const [color, setColor] = useState<string | null>(null);
+  const [folderId, setFolderId] = useState<number | null>(null);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [featureTags, setFeatureTags] = useState<Tag[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
 
   const load = useCallback(async () => {
-    const row = await db.getFirstAsync<Feature>('SELECT * FROM features WHERE id = ?', featureId);
+    const [row, folderRows, tagRows, allTagRows] = await Promise.all([
+      db.getFirstAsync<Feature>('SELECT * FROM features WHERE id = ?', featureId),
+      listFolders(db),
+      listTagsForFeature(db, featureId),
+      listTags(db),
+    ]);
     setFeature(row);
     setName(row?.name ?? '');
     setNotes(row?.notes ?? '');
+    setColor(row?.color ?? null);
+    setFolderId(row?.folder_id ?? null);
+    setFolders(folderRows);
+    setFeatureTags(tagRows);
+    setAllTags(allTagRows);
   }, [db, featureId]);
 
   useFocusEffect(
@@ -58,13 +86,35 @@ export function FeatureDetailScreen() {
 
   async function save() {
     await db.runAsync(
-      'UPDATE features SET name = ?, notes = ?, updated_at = ? WHERE id = ?',
+      'UPDATE features SET name = ?, notes = ?, color = ?, folder_id = ?, updated_at = ? WHERE id = ?',
       name || null,
       notes || null,
+      color,
+      folderId,
       Date.now(),
       featureId
     );
     navigation.goBack();
+  }
+
+  async function handleAddTag(tag: Tag) {
+    await addTagToFeature(db, featureId, tag.id);
+    setTagPickerOpen(false);
+    load();
+  }
+
+  async function handleCreateTag() {
+    if (!newTagName.trim()) return;
+    const tagId = await getOrCreateTag(db, newTagName.trim());
+    await addTagToFeature(db, featureId, tagId);
+    setNewTagName('');
+    setTagPickerOpen(false);
+    load();
+  }
+
+  async function handleRemoveTag(tagId: number) {
+    await removeTagFromFeature(db, featureId, tagId);
+    load();
   }
 
   function confirmDelete() {
@@ -89,6 +139,9 @@ export function FeatureDetailScreen() {
     );
   }
 
+  const unassignedTags = allTags.filter((t) => !featureTags.some((ft) => ft.id === t.id));
+  const currentFolder = folders.find((f) => f.id === folderId);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.label}>Name</Text>
@@ -101,6 +154,34 @@ export function FeatureDetailScreen() {
         onChangeText={setNotes}
         multiline
       />
+
+      <Text style={styles.label}>Folder</Text>
+      <Pressable style={styles.folderButton} onPress={() => setFolderPickerOpen(true)}>
+        <Text style={styles.folderButtonText}>{currentFolder?.name ?? 'None'}</Text>
+      </Pressable>
+
+      <Text style={styles.label}>Color</Text>
+      <View style={styles.colorRow}>
+        {FEATURE_COLOR_PALETTE.map((c) => (
+          <Pressable
+            key={c}
+            style={[styles.swatch, { backgroundColor: c }, color === c && styles.swatchSelected]}
+            onPress={() => setColor(c)}
+          />
+        ))}
+      </View>
+
+      <Text style={styles.label}>Tags</Text>
+      <View style={styles.tagRow}>
+        {featureTags.map((tag) => (
+          <Pressable key={tag.id} style={styles.tagChip} onPress={() => handleRemoveTag(tag.id)}>
+            <Text style={styles.tagChipText}>{tag.name} ✕</Text>
+          </Pressable>
+        ))}
+        <Pressable style={styles.addTagChip} onPress={() => setTagPickerOpen(true)}>
+          <Text style={styles.addTagChipText}>+ Add tag</Text>
+        </Pressable>
+      </View>
 
       <Text style={styles.label}>Coordinates</Text>
       <Text style={styles.readonlyValue}>{formatCoordinates(feature.geometry)}</Text>
@@ -130,6 +211,45 @@ export function FeatureDetailScreen() {
       <Pressable style={styles.deleteButton} onPress={confirmDelete}>
         <Text style={styles.deleteButtonText}>Delete</Text>
       </Pressable>
+
+      <FolderPickerModal
+        visible={folderPickerOpen}
+        folders={folders}
+        onFoldersChanged={load}
+        onSelect={(id) => {
+          setFolderId(id);
+          setFolderPickerOpen(false);
+        }}
+        onClose={() => setFolderPickerOpen(false)}
+      />
+
+      <Modal visible={tagPickerOpen} animationType="slide" transparent onRequestClose={() => setTagPickerOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setTagPickerOpen(false)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.sheetTitle}>Add tag</Text>
+            <View style={styles.newTagRow}>
+              <TextInput
+                style={styles.newTagInput}
+                placeholder="New tag name…"
+                value={newTagName}
+                onChangeText={setNewTagName}
+                onSubmitEditing={handleCreateTag}
+              />
+              <Pressable style={styles.newTagButton} onPress={handleCreateTag}>
+                <Text style={styles.newTagButtonText}>Add</Text>
+              </Pressable>
+            </View>
+            {unassignedTags.map((tag) => (
+              <Pressable key={tag.id} style={styles.sheetRow} onPress={() => handleAddTag(tag)}>
+                <Text>{tag.name}</Text>
+              </Pressable>
+            ))}
+            <Pressable style={styles.cancelButton} onPress={() => setTagPickerOpen(false)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -146,6 +266,22 @@ const styles = StyleSheet.create({
   },
   notesInput: { minHeight: 80, textAlignVertical: 'top' },
   readonlyValue: { fontSize: 16, paddingVertical: 8 },
+  folderButton: { paddingVertical: 8 },
+  folderButtonText: { fontSize: 16, color: '#2f6f4f', fontWeight: '600' },
+  colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingVertical: 8 },
+  swatch: { width: 28, height: 28, borderRadius: 14 },
+  swatchSelected: { borderWidth: 3, borderColor: '#333' },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingVertical: 8 },
+  tagChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#eee' },
+  tagChipText: { fontSize: 12, fontWeight: '600' },
+  addTagChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2f6f4f',
+  },
+  addTagChipText: { fontSize: 12, fontWeight: '600', color: '#2f6f4f' },
   saveButton: {
     marginTop: 24,
     backgroundColor: '#2f6f4f',
@@ -165,4 +301,31 @@ const styles = StyleSheet.create({
   directionsButtonText: { color: '#2f6f4f', fontWeight: '700' },
   deleteButton: { marginTop: 12, paddingVertical: 12, alignItems: 'center' },
   deleteButtonText: { color: '#c0392b', fontWeight: '600' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    maxHeight: '70%',
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  sheetRow: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#eee' },
+  newTagRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  newTagInput: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+  },
+  newTagButton: {
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#2f6f4f',
+  },
+  newTagButtonText: { color: 'white', fontWeight: '700' },
+  cancelButton: { paddingVertical: 14, alignItems: 'center' },
+  cancelText: { color: '#c0392b', fontWeight: '600' },
 });

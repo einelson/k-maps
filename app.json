@@ -24,7 +24,10 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -37,7 +40,8 @@
         {
           "locationWhenInUsePermission": "K-Maps shows your position on the map and records GPS tracks when you ask it to."
         }
-      ]
+      ],
+      "expo-sharing"
     ]
   }
 }
