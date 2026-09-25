@@ -25,13 +25,20 @@ jest.mock('expo-location', () => ({
   startLocationUpdatesAsync: jest.fn(),
   stopLocationUpdatesAsync: jest.fn(),
   hasStartedLocationUpdatesAsync: jest.fn(),
+  hasServicesEnabledAsync: jest.fn(),
+  getBackgroundPermissionsAsync: jest.fn(),
+  requestBackgroundPermissionsAsync: jest.fn(),
   LocationAccuracy: { BestForNavigation: 6 },
+  LocationActivityType: { Fitness: 3 },
 }));
 
 const requestPermission = Location.requestForegroundPermissionsAsync as jest.Mock;
 const startUpdates = Location.startLocationUpdatesAsync as jest.Mock;
 const stopUpdates = Location.stopLocationUpdatesAsync as jest.Mock;
 const hasStarted = Location.hasStartedLocationUpdatesAsync as jest.Mock;
+const servicesEnabled = Location.hasServicesEnabledAsync as jest.Mock;
+const getBackground = Location.getBackgroundPermissionsAsync as jest.Mock;
+const requestBackground = Location.requestBackgroundPermissionsAsync as jest.Mock;
 
 /** jest-expo runs as iOS by default; the notification prompt is Android-only. */
 function asAndroid(version: number) {
@@ -50,6 +57,9 @@ beforeEach(() => {
   startUpdates.mockReset().mockResolvedValue(undefined);
   stopUpdates.mockReset().mockResolvedValue(undefined);
   hasStarted.mockReset().mockResolvedValue(true);
+  servicesEnabled.mockReset().mockResolvedValue(true);
+  getBackground.mockReset().mockResolvedValue({ status: 'undetermined', canAskAgain: true });
+  requestBackground.mockReset().mockResolvedValue({ status: 'granted', canAskAgain: true });
   jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue('granted');
   jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
@@ -64,6 +74,31 @@ describe('startTrackRecording', () => {
     expect(store().recording).toBe(false);
   });
 
+  it('sends people to Settings when the system will not ask again', async () => {
+    requestPermission.mockResolvedValue({ status: 'denied', canAskAgain: false });
+    await expect(startTrackRecording(db)).resolves.toEqual({
+      ok: false,
+      reason: 'Location access is turned off for K-Maps. Allow it in Settings to record tracks.',
+      openSettings: true,
+    });
+    expect(startUpdates).not.toHaveBeenCalled();
+  });
+
+  it('does not offer Settings when the prompt can still be shown again', async () => {
+    requestPermission.mockResolvedValue({ status: 'denied', canAskAgain: true });
+    expect(await startTrackRecording(db)).not.toHaveProperty('openSettings');
+  });
+
+  it('refuses, before asking for anything, when Location Services are off', async () => {
+    servicesEnabled.mockResolvedValue(false);
+    await expect(startTrackRecording(db)).resolves.toEqual({
+      ok: false,
+      reason: "Location Services are turned off. Turn them on in your phone's settings.",
+    });
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(await getRecordingSession(db)).toBeNull();
+  });
+
   it('opens a session, starts the foreground-service location task, and begins the live mirror', async () => {
     await expect(startTrackRecording(db)).resolves.toEqual({ ok: true });
     expect(await getRecordingSession(db)).toEqual({ startedAt: expect.any(Number) });
@@ -76,6 +111,14 @@ describe('startTrackRecording', () => {
     expect(options.foregroundService.killServiceOnDestroy).toBeUndefined(); // it must outlive the app being closed
     expect(options.timeInterval).toBe(3000);
     expect(options.distanceInterval).toBe(5);
+  });
+
+  it('configures the iOS side: blue pill, no automatic pausing, fitness activity', async () => {
+    await startTrackRecording(db);
+    const [, options] = startUpdates.mock.calls[0];
+    expect(options.showsBackgroundLocationIndicator).toBe(true);
+    expect(options.pausesUpdatesAutomatically).toBe(false);
+    expect(options.activityType).toBe(3);
   });
 
   it('asks for notification permission on Android 13+, and records even if it is refused', async () => {
@@ -100,6 +143,25 @@ describe('startTrackRecording', () => {
     (PermissionsAndroid.request as jest.Mock).mockRejectedValue(new Error('no activity'));
     asAndroid(34);
     await expect(startTrackRecording(db)).resolves.toEqual({ ok: true });
+  });
+
+  it('turns the iOS "background mode not configured" error into something actionable', async () => {
+    startUpdates.mockRejectedValue(new Error("Background location has not been configured, make sure to add 'location' to 'UIBackgroundModes' in the Info.plist file"));
+    const result = await startTrackRecording(db);
+    expect(result).toEqual({ ok: false, reason: "This build of K-Maps wasn't set up for background location. Install the latest build." });
+  });
+
+  it('turns a Location Services error from the native side into plain words', async () => {
+    startUpdates.mockRejectedValue(new Error('Location services are disabled'));
+    expect(await startTrackRecording(db)).toEqual({
+      ok: false,
+      reason: "Location Services are turned off. Turn them on in your phone's settings.",
+    });
+  });
+
+  it('gives a fallback message when the error has none', async () => {
+    startUpdates.mockRejectedValue('nope');
+    expect(await startTrackRecording(db)).toEqual({ ok: false, reason: 'Location updates could not be started.' });
   });
 
   it('undoes the session and reports why when the service cannot start', async () => {
@@ -138,6 +200,45 @@ describe('startTrackRecording', () => {
   });
 });
 
+describe('the iOS "Always" upgrade', () => {
+  it('is offered once recording has started, on iOS', async () => {
+    await startTrackRecording(db);
+    expect(startUpdates).toHaveBeenCalled();
+    expect(requestBackground).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered when it is already granted, or the system will not ask again', async () => {
+    getBackground.mockResolvedValueOnce({ status: 'granted', canAskAgain: true });
+    await startTrackRecording(db);
+    expect(requestBackground).not.toHaveBeenCalled();
+
+    await discardTrackRecording(db);
+    getBackground.mockResolvedValueOnce({ status: 'denied', canAskAgain: false });
+    await startTrackRecording(db);
+    expect(requestBackground).not.toHaveBeenCalled();
+  });
+
+  it('is never offered on Android, whose foreground service needs no such permission', async () => {
+    asAndroid(34);
+    await startTrackRecording(db);
+    expect(getBackground).not.toHaveBeenCalled();
+    expect(requestBackground).not.toHaveBeenCalled();
+  });
+
+  it('is not asked for when recording could not start', async () => {
+    startUpdates.mockRejectedValue(new Error('nope'));
+    await startTrackRecording(db);
+    expect(requestBackground).not.toHaveBeenCalled();
+  });
+
+  it('never blocks or fails the recording, even if the prompt throws', async () => {
+    requestBackground.mockRejectedValue(new Error('prompt failed'));
+    await expect(startTrackRecording(db)).resolves.toEqual({ ok: true });
+    await Promise.resolve();
+    expect(store().recording).toBe(true);
+  });
+});
+
 describe('syncRecording', () => {
   it('mirrors fixes the task stored, only the new ones each time', async () => {
     await startTrackRecording(db);
@@ -166,6 +267,7 @@ describe('syncRecording', () => {
     await syncRecording(db);
     expect(startUpdates).toHaveBeenCalledTimes(2);
     expect(store().interrupted).toBe(false);
+    expect(store().resumedAfterGap).toBe(true);
   });
 });
 
@@ -195,6 +297,13 @@ describe('restoreRecording', () => {
     await restoreRecording(db);
     expect(startUpdates).toHaveBeenCalledTimes(1);
     expect(store().interrupted).toBe(false);
+    expect(store().resumedAfterGap).toBe(true); // there was a stretch with nothing recorded
+  });
+
+  it('does not flag a gap when the service was still running', async () => {
+    await startRecordingSession(db, 5000);
+    await restoreRecording(db);
+    expect(store().resumedAfterGap).toBe(false);
   });
 
   it('flags the recording as interrupted when the service cannot be restarted', async () => {

@@ -1,5 +1,6 @@
 import {
   BASE_MAP_TILE_URLS,
+  MAP_MAX_ZOOM,
   OSM_ATTRIBUTION,
   USGS_ATTRIBUTION,
   USGS_IMAGERY_TILE_URL,
@@ -82,6 +83,11 @@ describe('USGS constants', () => {
     expect(USGS_MAX_NATIVE_ZOOM).toBe(16);
     expect(USGS_SHADED_RELIEF_MAX_ZOOM).toBe(13);
     expect(USGS_SHADED_RELIEF_MAX_ZOOM).toBeLessThan(USGS_MAX_NATIVE_ZOOM);
+  });
+
+  it('limits camera zoom to a little past the last real tile, not MapLibre’s default of 22', () => {
+    expect(MAP_MAX_ZOOM).toBeGreaterThanOrEqual(USGS_MAX_NATIVE_ZOOM);
+    expect(MAP_MAX_ZOOM).toBeLessThanOrEqual(USGS_MAX_NATIVE_ZOOM + 2);
   });
 
   it('carries attribution strings', () => {

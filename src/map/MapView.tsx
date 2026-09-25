@@ -65,6 +65,7 @@ import { usePoiStore } from '../state/usePoiStore';
 import { useLayersStore } from '../state/useLayersStore';
 import {
   BASE_MAP_TILE_URLS,
+  MAP_MAX_ZOOM,
   USGS_ATTRIBUTION,
   USGS_MAX_NATIVE_ZOOM,
   USGS_SHADED_RELIEF_MAX_ZOOM,
@@ -442,7 +443,7 @@ export function MapScreenMap({
           onViewStateChange?.(event.nativeEvent);
         }}
       >
-        <Camera ref={cameraRef} initialViewState={{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM }} />
+        <Camera ref={cameraRef} initialViewState={{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM }} maxZoom={MAP_MAX_ZOOM} />
 
         <Layer id={BASE_ANCHOR} type="background" layout={{ visibility: 'none' }} />
 

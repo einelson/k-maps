@@ -35,6 +35,7 @@ export function RecordingPanel({ visible, onClose, onEnd, onDelete, busy = false
   const altitudes = useTrackRecordingStore((s) => s.altitudes);
   const distanceM = useTrackRecordingStore((s) => s.distanceM);
   const interrupted = useTrackRecordingStore((s) => s.interrupted);
+  const resumedAfterGap = useTrackRecordingStore((s) => s.resumedAfterGap);
   // Only ticks while the panel is open: a Modal that isn't visible still keeps its children mounted.
   const now = useNow(visible ? 1000 : 60_000);
   const samples = useMemo<TrackSamples>(() => ({ times, elevations: altitudes }), [times, altitudes]);
@@ -70,6 +71,13 @@ export function RecordingPanel({ visible, onClose, onEnd, onDelete, busy = false
           </Text>
         )}
 
+        {resumedAfterGap && !interrupted && (
+          <Text style={styles.gapNote}>
+            Recording stopped for a while (K-Maps was closed or the system paused it) and has been restarted. The
+            track draws a straight line across that gap.
+          </Text>
+        )}
+
         <TrackDashboard coordinates={points} samples={samples} recorded live />
       </ScrollView>
 
@@ -96,6 +104,7 @@ const makeStyles = (c: ThemeColors) =>
     hero: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
     heroTime: { fontSize: 40, fontWeight: '800' },
     heroDistance: { fontSize: 24, fontWeight: '700', color: c.primaryText },
+    gapNote: { fontSize: 13, color: c.textMuted, backgroundColor: c.field, borderRadius: 8, padding: 10 },
     warning: { fontSize: 13, color: c.danger, backgroundColor: c.dangerTint, borderRadius: 8, padding: 10 },
     buttons: { flexDirection: 'row', gap: 12, marginTop: 12 },
     button: { flex: 1, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },

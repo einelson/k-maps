@@ -11,8 +11,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ethannelson.kmaps",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "K-Maps shows your position on the map and records GPS tracks when you ask it to.",
-        "UIBackgroundModes": []
+        "NSLocationWhenInUseUsageDescription": "K-Maps shows your position on the map and records GPS tracks when you ask it to."
       }
     },
     "android": {
@@ -59,6 +58,9 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "K-Maps shows your position on the map and records GPS tracks when you ask it to.",
+          "locationAlwaysAndWhenInUsePermission": "K-Maps records your GPS track while your phone is locked or K-Maps is in the background, only after you start recording a track.",
+          "isIosBackgroundLocationEnabled": true,
+          "motionUsagePermission": false,
           "isAndroidForegroundServiceEnabled": true,
           "isAndroidBackgroundLocationEnabled": false
         }

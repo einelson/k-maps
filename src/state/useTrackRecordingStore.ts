@@ -23,12 +23,15 @@ interface TrackRecordingState {
   lastFixId: number;
   /** Location updates stopped (permission revoked, service killed) and couldn't be restarted. */
   interrupted: boolean;
+  /** Updates had stopped (the system or the user closed the app) and were started again: the line jumps across a gap. */
+  resumedAfterGap: boolean;
   begin: (startedAt: number) => void;
   /** Replaces everything with the stored recording. */
   hydrate: (startedAt: number, fixes: StoredFix[]) => void;
   /** Adds fixes newer than what is already mirrored. */
   appendFixes: (fixes: StoredFix[]) => void;
   setInterrupted: (interrupted: boolean) => void;
+  setResumedAfterGap: (resumedAfterGap: boolean) => void;
   reset: () => void;
 }
 
@@ -41,6 +44,7 @@ const EMPTY = {
   distanceM: 0,
   lastFixId: 0,
   interrupted: false,
+  resumedAfterGap: false,
 };
 
 /** Extends the mirrored arrays and running distance with `fixes`. */
@@ -66,9 +70,11 @@ function withFixes<S extends Pick<TrackRecordingState, 'points' | 'times' | 'alt
 export const useTrackRecordingStore = create<TrackRecordingState>((set) => ({
   ...EMPTY,
   begin: (startedAt) => set({ ...EMPTY, recording: true, startedAt }),
-  hydrate: (startedAt, fixes) => set((s) => ({ ...withFixes({ ...s, ...EMPTY }, fixes), recording: true, startedAt, interrupted: s.interrupted })),
+  hydrate: (startedAt, fixes) =>
+    set((s) => ({ ...withFixes({ ...s, ...EMPTY }, fixes), recording: true, startedAt, interrupted: s.interrupted, resumedAfterGap: s.resumedAfterGap })),
   // A sync that was already in flight when the recording ended must not repopulate the cleared store.
   appendFixes: (fixes) => set((s) => (s.recording ? withFixes(s, fixes.filter((f) => f.id > s.lastFixId)) : s)),
   setInterrupted: (interrupted) => set({ interrupted }),
+  setResumedAfterGap: (resumedAfterGap) => set({ resumedAfterGap }),
   reset: () => set(EMPTY),
 }));

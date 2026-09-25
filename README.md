@@ -158,13 +158,16 @@ token they rely on; what's untested is how they look and behave on the phone.
   length/area readout, undo/cancel/done, saved to SQLite on completion; a separate measure tool
   that never saves (§7.3)
 - GPS dot toggle and **background GPS track recording** (§7.5) that keeps going with the screen locked
-  or the app closed. Record track (in the "+" menu) starts an Android foreground-service location task
-  (`expo-location` + `expo-task-manager`, `src/features/trackTask.ts`), which shows a "Recording a track"
-  notification while it runs and appends every fix to SQLite (`recording_session` / `recording_fixes`) as
-  it arrives, so the recording survives the app being killed. Because the service is started while the app
-  is on screen it needs only the ordinary location permission, not "Allow all the time". When you reopen the
-  app it rebuilds the live recording from the database (`RecordingSync`) and restarts the service if the
-  system killed it. Fixes worse than 50 m accuracy are dropped (a cold GPS start otherwise draws a spike)
+  or the app closed. Record track (in the "+" menu) starts a location task (`expo-location` +
+  `expo-task-manager`, `src/features/trackTask.ts`) — on Android under a foreground service that shows a
+  "Recording a track" notification, on iOS under the `location` background mode — which appends every
+  fix to SQLite (`recording_session` / `recording_fixes`) as it arrives, so the recording survives the
+  app being killed. Because the service is started while the app is on screen it needs only the ordinary
+  location permission, not "Allow all the time". When you reopen the app it rebuilds the live recording
+  from the database (`RecordingSync`) and restarts the service if the system killed it, saying in the
+  panel that the line jumps across the gap. Denied permission with no way to re-prompt offers "Open
+  Settings"; Location Services being off is reported up front. Fixes worse than 50 m accuracy are dropped
+  (a cold GPS start otherwise draws a spike)
 - **Recording button + panel.** While recording, a "● 12:34 · 1.23 mi" button sits on the map under the
   locate button. Tapping it (or "Track stats" in the "+" menu) opens a panel with the live clock and
   distance, the same stats and charts a saved track shows, and **Delete** (asks first) and **End & save**.
@@ -250,7 +253,16 @@ token they rely on; what's untested is how they look and behave on the phone.
   terminates the app"; a foreground service normally prevents that, but Samsung's battery manager can still
   kill it — set K-Maps to "Unrestricted" battery use). Nothing already recorded is lost either way: it's in
   SQLite and reopening the app picks it up, but there would be a gap
-- Android only: iOS would need `isIosBackgroundLocationEnabled` and an "Always" permission flow, untested
+- iOS recording is configured but has never run on an iPhone (nothing here can build for iOS; only the
+  generated Info.plist was checked: `UIBackgroundModes` has `location`). How it's meant to behave: the
+  `location` background mode keeps a backgrounded, screen-locked app receiving fixes (blue status-bar
+  pill); "Always" permission is offered once recording has started and only matters if the system
+  terminates the app, which it can then relaunch. **iOS never relaunches an app the user force-quit
+  (swiped away in the app switcher), so there a swipe-away ends the recording** — reopening K-Maps
+  restores what was recorded, restarts recording and notes the gap in the panel. `timeInterval` is
+  Android-only, so iOS records every 5 m of movement (no fixes while standing still)
+- Not done for iOS: "Open in K-Maps" for GPX/KML files (needs `CFBundleDocumentTypes`), and a cloud
+  build (`eas build --platform ios` needs an Apple developer account)
 - The foreground-service notification uses the launcher icon as its small icon, which some Android versions
   draw as a white square; a dedicated monochrome notification icon would fix it
 - Everything in the spec's "Later" roadmap row

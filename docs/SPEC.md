@@ -360,6 +360,8 @@ Record a breadcrumb line with `expo-location`, save as a `line` with `source='tr
 
 Recording runs in the background (screen locked, app closed) as an `expo-location` task under an Android foreground service with a visible notification. The task appends each fix to SQLite (`recording_session`, `recording_fixes`) so nothing depends on the app's JS being alive; the app mirrors that table into memory while open and saves the track from it. Started while the app is on screen, the service needs only the ordinary location permission (no "Allow all the time"); it needs `FOREGROUND_SERVICE_LOCATION` on Android 14+ and, to show the notification on Android 13+, `POST_NOTIFICATIONS`.
 
+On iOS the same task runs under the `location` background mode (`UIBackgroundModes`, via the expo-location plugin's `isIosBackgroundLocationEnabled`) with the blue status-bar indicator; "While Using" permission is enough to keep recording while backgrounded or locked, and "Always" (offered once recording has started) additionally lets the system relaunch a terminated app. A force-quit app is never relaunched, so a swipe-away ends the recording there; reopening restores the stored fixes, restarts updates and notes the gap.
+
 While recording, a map button shows elapsed time and distance and opens a panel: live stats and charts, Delete, and End & save.
 
 Tapping a track opens its dashboard: distance, elapsed and moving time, average speed, climb/descent/high/low point, an elevation chart (against time or distance) and a distance-over-time chart, plus the usual name/folder/color/tags and a GPX export that carries `<time>` and `<ele>`. Imported GPX tracks that have timestamps or elevation get the same dashboard.

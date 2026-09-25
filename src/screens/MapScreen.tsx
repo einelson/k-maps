@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Alert, Keyboard, Pressable, StyleSheet, Vibration, View } from 'react-native';
+import { Alert, Keyboard, Linking, Pressable, StyleSheet, Vibration, View } from 'react-native';
 import { GeoJSONSource, Layer, type CameraRef, type MapRef } from '@maplibre/maplibre-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -365,7 +365,15 @@ export function MapScreen() {
       return;
     }
     const result = await startTrackRecording(db);
-    if (!result.ok) Alert.alert('Cannot record track', result.reason);
+    if (!result.ok) {
+      Alert.alert(
+        'Cannot record track',
+        result.reason,
+        result.openSettings
+          ? [{ text: 'Not now', style: 'cancel' }, { text: 'Open Settings', onPress: () => void Linking.openSettings() }]
+          : undefined
+      );
+    }
   }
 
   async function handleEndRecording() {
@@ -611,7 +619,8 @@ export function MapScreen() {
           busy={recordingBusy}
         />
 
-        {canAdd && (
+        {/* Hidden while the layers panel is open: it would sit on top of the panel's last toggles. */}
+        {canAdd && openPanel !== 'layers' && (
           <AddMenu
             open={openPanel === 'add'}
             onToggle={() => togglePanel('add')}

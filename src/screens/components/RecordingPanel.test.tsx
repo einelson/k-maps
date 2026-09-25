@@ -141,6 +141,21 @@ describe('RecordingPanel', () => {
     expect(pressableWith(renderer, 'End & save').props.disabled).toBeFalsy();
   });
 
+  it('says so when recording was restarted after a gap, and not otherwise', () => {
+    recordFixes(5);
+    mount();
+    expect(texts().some((t) => t.includes('straight line across that gap'))).toBe(false);
+    act(() => useTrackRecordingStore.setState({ resumedAfterGap: true }));
+    expect(texts().some((t) => t.includes('straight line across that gap'))).toBe(true);
+  });
+
+  it('leaves out the gap note when the more serious stopped warning is showing', () => {
+    recordFixes(5);
+    act(() => useTrackRecordingStore.setState({ resumedAfterGap: true, interrupted: true }));
+    mount();
+    expect(texts().some((t) => t.includes('straight line across that gap'))).toBe(false);
+  });
+
   it('follows the metric setting', () => {
     recordFixes(21);
     act(() => {

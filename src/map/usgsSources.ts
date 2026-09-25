@@ -26,6 +26,12 @@ export const USGS_TILE_SIZE = 256;
  */
 export const USGS_MAX_NATIVE_ZOOM = 16;
 
+/**
+ * How far in the map camera lets you zoom. Two levels past the last real tile (z16), so a pin can still be placed
+ * a little finer than the tiles resolve — beyond that MapLibre just keeps enlarging z16 pixels with nothing more to see.
+ */
+export const MAP_MAX_ZOOM = USGS_MAX_NATIVE_ZOOM + 2;
+
 /** Shaded relief is coarser: real tiles stop at z13 (404 from z14), same probe as above. */
 export const USGS_SHADED_RELIEF_MAX_ZOOM = 13;
 

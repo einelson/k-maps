@@ -16,20 +16,26 @@ import { TRACK_TASK_NAME } from './trackConfig';
 /**
  * Track recording that keeps going with the screen locked or the app closed (§7.5).
  *
- * It's a location task (src/features/trackTask.ts) run by an Android foreground service, which shows a
- * "recording" notification for as long as it's on — that notification is what lets Android keep the app's GPS
- * running in the background. Because the service is started while the app is on screen it only needs the
- * ordinary location permission, not "Allow all the time". Every fix is written to SQLite as it arrives, so
- * the recording survives the app being killed; this module then rebuilds it from there (`restoreRecording`)
- * and saves it from there (`finishTrackRecording`).
+ * It's a location task (src/features/trackTask.ts). On Android it runs under a foreground service, whose
+ * "recording" notification is what lets the system keep the app's GPS going in the background; because the
+ * service is started while the app is on screen it needs only the ordinary location permission, not "Allow
+ * all the time". On iOS the `location` background mode keeps a backgrounded app receiving updates (with the
+ * blue status-bar pill), and "Always" permission, offered once recording has started, additionally lets the
+ * system relaunch the app after terminating it. iOS never relaunches an app the user force-quit, so there a
+ * swipe-away ends the recording (see README). Every fix is written to SQLite as it arrives, so the recording
+ * survives the app being killed either way; this module then rebuilds it from there (`restoreRecording`) and
+ * saves it from there (`finishTrackRecording`).
  */
 
 const TASK_OPTIONS: LocationTaskOptions = {
   accuracy: Location.LocationAccuracy.BestForNavigation,
-  timeInterval: 3000,
+  timeInterval: 3000, // Android only
   distanceInterval: 5,
+  // iOS only: the blue "using your location" pill while backgrounded, no automatic pausing when the phone
+  // thinks you've stopped (which would leave gaps at every rest), and a hint that this is a walk or hike.
   showsBackgroundLocationIndicator: true,
   pausesUpdatesAutomatically: false,
+  activityType: Location.LocationActivityType.Fitness,
   foregroundService: {
     notificationTitle: 'Recording a track',
     notificationBody: 'K-Maps is recording your route. Tap to open it.',
@@ -37,7 +43,14 @@ const TASK_OPTIONS: LocationTaskOptions = {
   },
 };
 
-export type StartResult = { ok: true } | { ok: false; reason: string };
+export type StartResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: string;
+      /** The system won't ask again, so the only way forward is the app's page in Settings. */
+      openSettings?: boolean;
+    };
 
 /**
  * Android 13+ hides the foreground-service notification unless it's allowed. Recording works either way, so
@@ -50,6 +63,33 @@ async function requestNotificationPermission(): Promise<void> {
   } catch {
     // Not being able to ask isn't a reason to refuse to record.
   }
+}
+
+/**
+ * iOS keeps delivering updates to a backgrounded app that started them on screen with only "While Using"
+ * permission, but only "Always" lets the system relaunch the app after it has been terminated (low memory,
+ * a reboot) and carry on recording. Asking after recording has started means the prompt never delays the
+ * track, and a "Keep Only While Using" answer costs nothing: recording is already running. The system only
+ * shows this once. Android needs no such step (its foreground service does the job).
+ */
+async function offerAlwaysPermission(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  try {
+    const current = await Location.getBackgroundPermissionsAsync();
+    if (current.status !== 'granted' && current.canAskAgain) await Location.requestBackgroundPermissionsAsync();
+  } catch {
+    // Optional upgrade; recording doesn't depend on it.
+  }
+}
+
+/** The native errors are written for developers ("add 'location' to 'UIBackgroundModes'…"); say what to do instead. */
+function describeStartError(err: unknown): string {
+  const message = err instanceof Error ? err.message : '';
+  if (/UIBackgroundModes/i.test(message)) {
+    return "This build of K-Maps wasn't set up for background location. Install the latest build.";
+  }
+  if (/services are disabled/i.test(message)) return "Location Services are turned off. Turn them on in your phone's settings.";
+  return message || 'Location updates could not be started.';
 }
 
 async function stopUpdates(): Promise<void> {
@@ -69,9 +109,14 @@ export async function startTrackRecording(db: SQLiteDatabase): Promise<StartResu
   if (starting || useTrackRecordingStore.getState().recording) return { ok: true };
   starting = true;
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (!(await Location.hasServicesEnabledAsync())) {
+      return { ok: false, reason: "Location Services are turned off. Turn them on in your phone's settings." };
+    }
+    const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
-      return { ok: false, reason: 'Location permission was not granted.' };
+      return canAskAgain === false
+        ? { ok: false, reason: 'Location access is turned off for K-Maps. Allow it in Settings to record tracks.', openSettings: true }
+        : { ok: false, reason: 'Location permission was not granted.' };
     }
     await requestNotificationPermission();
 
@@ -81,9 +126,10 @@ export async function startTrackRecording(db: SQLiteDatabase): Promise<StartResu
       await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, TASK_OPTIONS);
     } catch (err) {
       await clearRecording(db);
-      return { ok: false, reason: err instanceof Error ? err.message : 'Location updates could not be started.' };
+      return { ok: false, reason: describeStartError(err) };
     }
     useTrackRecordingStore.getState().begin(startedAt);
+    void offerAlwaysPermission();
     return { ok: true };
   } finally {
     starting = false;
@@ -99,18 +145,25 @@ export async function syncRecording(db: SQLiteDatabase): Promise<void> {
   if (store.interrupted) await ensureUpdatesRunning();
 }
 
-/** True when updates are running (restarting them if needed); false, and `interrupted`, when they can't be. */
-async function ensureUpdatesRunning(): Promise<boolean> {
+type UpdatesState = 'running' | 'restarted' | 'failed';
+
+/**
+ * Makes sure location updates are running, restarting them if they had stopped. A restart means there was a
+ * stretch with no fixes (the system killed the service, or on iOS the user force-quit the app), which the
+ * store remembers so the UI can say the line jumps across it. When they can't be restarted the store is
+ * flagged `interrupted`.
+ */
+async function ensureUpdatesRunning(): Promise<UpdatesState> {
   const store = useTrackRecordingStore.getState();
   try {
-    if (!(await Location.hasStartedLocationUpdatesAsync(TRACK_TASK_NAME))) {
-      await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, TASK_OPTIONS);
-    }
+    const wasRunning = await Location.hasStartedLocationUpdatesAsync(TRACK_TASK_NAME);
+    if (!wasRunning) await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, TASK_OPTIONS);
     store.setInterrupted(false);
-    return true;
+    if (!wasRunning) store.setResumedAfterGap(true);
+    return wasRunning ? 'running' : 'restarted';
   } catch {
     store.setInterrupted(true);
-    return false;
+    return 'failed';
   }
 }
 

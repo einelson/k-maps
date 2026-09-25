@@ -14,7 +14,7 @@ beforeEach(() => useTrackRecordingStore.getState().reset());
 
 describe('useTrackRecordingStore', () => {
   it('starts empty and not recording', () => {
-    expect(store()).toMatchObject({ recording: false, startedAt: null, points: [], times: [], altitudes: [], distanceM: 0, lastFixId: 0, interrupted: false });
+    expect(store()).toMatchObject({ recording: false, startedAt: null, points: [], times: [], altitudes: [], distanceM: 0, lastFixId: 0, interrupted: false, resumedAfterGap: false });
   });
 
   it('begin starts an empty recording at the given time', () => {
@@ -83,6 +83,18 @@ describe('useTrackRecordingStore', () => {
     store().setInterrupted(true);
     store().hydrate(1, []);
     expect(store().interrupted).toBe(true);
+  });
+
+  it('remembers a gap across a rebuild from the database, and forgets it on reset or a new recording', () => {
+    store().begin(0);
+    store().setResumedAfterGap(true);
+    store().hydrate(0, [fix(1, 43)]);
+    expect(store().resumedAfterGap).toBe(true);
+    store().reset();
+    expect(store().resumedAfterGap).toBe(false);
+    store().setResumedAfterGap(true);
+    store().begin(5);
+    expect(store().resumedAfterGap).toBe(false);
   });
 
   it('setInterrupted toggles the flag', () => {
