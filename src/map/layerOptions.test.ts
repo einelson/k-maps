@@ -68,7 +68,7 @@ describe('overlay groups', () => {
   });
 
   it('the hunting-units note carries IDFG\'s "check the booklet" caveat', () => {
-    expect(OVERLAYS.find((o) => o.id === 'huntUnits')!.note).toMatch(/regulation booklet/i);
+    expect(OVERLAYS.find((o) => o.id === 'huntUnits')!.note).toMatch(/hunting regulations/i);
   });
 });
 

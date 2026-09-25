@@ -10,6 +10,9 @@ import { FeatureDetailScreen } from '../screens/FeatureDetailScreen';
 import { ImportExportScreen } from '../screens/ImportExportScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { useTheme } from '../theme';
+import { IncomingImportHandler } from './IncomingImportHandler';
+import { navigationRef } from './navigationRef';
+import { RecordingSync } from './RecordingSync';
 
 export type RootStackParamList = {
   /** `editFeatureId` opens the map with that feature's vertex editor active (§7.3). */
@@ -44,7 +47,7 @@ export function RootNavigator() {
   }, [isDark, colors]);
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="Map"
         // Status-bar icons follow the header. The map screen has none — the bar floats over the
@@ -71,6 +74,8 @@ export function RootNavigator() {
         />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
       </Stack.Navigator>
+      <IncomingImportHandler />
+      <RecordingSync />
     </NavigationContainer>
   );
 }

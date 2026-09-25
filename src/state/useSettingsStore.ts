@@ -1,8 +1,8 @@
-import Storage from 'expo-sqlite/kv-store';
 import { create } from 'zustand';
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import type { AppearancePreference } from '../theme/colors';
+import { kvStorage } from './kvStorage';
 
 export type UnitSystem = 'imperial' | 'metric';
 export type CoordinateFormat = 'decimal' | 'dms' | 'utm';
@@ -17,16 +17,6 @@ interface SettingsState {
   appearance: AppearancePreference;
   setAppearance: (appearance: AppearancePreference) => void;
 }
-
-// expo-sqlite's key-value store is synchronous, so the saved settings are in place before the
-// first render — no flash of the wrong theme on launch.
-const kvStorage: StateStorage = {
-  getItem: (name) => Storage.getItemSync(name),
-  setItem: (name, value) => Storage.setItemSync(name, value),
-  removeItem: (name) => {
-    Storage.removeItemSync(name);
-  },
-};
 
 export const useSettingsStore = create<SettingsState>()(
   persist(

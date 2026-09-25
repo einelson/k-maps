@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import {
   Camera,
@@ -18,8 +18,11 @@ import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { FeatureCollection, Point } from 'geojson';
 
 import { localRasterTileUrl } from '../downloads/mbtiles';
+import { huntUnitsExist, huntUnitsUri } from '../huntUnits/storage';
+import type { HuntStateInfo } from '../huntUnits/types';
 import type { PackLayerId } from '../packs/types';
 import { useAutoLoadStore } from '../state/useAutoLoadStore';
+import { resolveActiveSet, useHuntUnitStore } from '../state/useHuntUnitStore';
 import { useWildfireStore } from '../state/useWildfireStore';
 import { Text, useThemedStyles, type ThemeColors } from '../theme';
 import { openDirections } from '../features/directions';
@@ -33,8 +36,12 @@ import { PUBLIC_LAND_DATA, PUBLIC_LAND_META, pubAccessLabel } from './landSource
 import { MVUM_CLASS_LABELS, MVUM_DATA, MVUM_META, mvumVehicleClass } from './mvumSource';
 import { ensureGlyphs, GLYPHS_URL_TEMPLATE } from './glyphs';
 import { BASE_MAPS, mapAttribution } from './layerOptions';
-import { HuntUnitLayers } from './HuntUnitLayers';
-import { HUNT_UNIT_DISCLAIMER, HUNT_UNITS_META } from './huntUnitsSource';
+import { HuntUnitLayers, type HuntUnitPressEvent, type HuntUnitSource } from './HuntUnitLayers';
+import { huntStatesInView } from './huntUnitWindow';
+import { huntUnitDisclaimer, huntUnitSourceNote } from './huntUnitsStyle';
+import { acceptanceFor, staleWarningFor, unacceptedStale } from './huntUnitStaleness';
+import { IDAHO_HUNT_STATE, IDAHO_UNITS_DATA } from './huntUnitsSource';
+import { HuntUnitDisclaimerModal } from '../screens/components/HuntUnitDisclaimerModal';
 import { LiveRasterLayers } from './LiveRasterLayers';
 import { PinImages } from './PinLayers';
 import {
@@ -47,8 +54,10 @@ import {
   TrailsLayers,
   usePackCells,
 } from './PackLayers';
+import { pickWindowCells } from './cellWindow';
 import { TRAIL_CLASS_LABELS } from './trailsSource';
 import { useAutoPackLoader } from './useAutoPackLoader';
+import { useCellWindow } from './useCellWindow';
 import { WildfireLayers } from './WildfireLayers';
 import { formatAcres, formatAge, formatContainment, formatDate, wildfireCategoryLabel } from './wildfireSource';
 import { POI_CATEGORY_META, POI_DATASETS, type PoiCategory } from './poiSources';
@@ -114,7 +123,18 @@ type Selected =
       width: string | null;
       miles: number | null;
     }
-  | { kind: 'huntUnit'; label: string; isUnit: boolean; elkZone: string | null; deerUrl: string | null; elkUrl: string | null }
+  | {
+      kind: 'huntUnit';
+      state: HuntStateInfo;
+      setId: string;
+      setLabel: string;
+      title: string;
+      note: string | null;
+      url: string | null;
+      urlLabel: string | null;
+      url2: string | null;
+      url2Label: string | null;
+    }
   | {
       kind: 'wildfire';
       name: string;
@@ -158,6 +178,12 @@ export interface MapScreenMapProps {
   children?: ReactNode;
 }
 
+/** Sets a ref of either kind — lets one element feed both our own ref and the one a parent passed in. */
+function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
+  if (typeof ref === 'function') ref(value);
+  else if (ref) ref.current = value;
+}
+
 export function MapScreenMap({
   onMapPress,
   onMapLongPress,
@@ -193,6 +219,43 @@ export function MapScreenMap({
   const poiVisibility = usePoiStore((s) => s.visibility);
   const [selected, setSelected] = useState<Selected | null>(null);
   const packCells = usePackCells();
+  // Only the downloaded cells in (or next to) the view are mounted: a region pack can install hundreds,
+  // and every mounted cell is a source plus several style layers.
+  const { cellWindow, viewBox, updateCellWindow } = useCellWindow();
+  const mountedPackCells = useMemo(() => pickWindowCells(packCells, cellWindow), [packCells, cellWindow]);
+  // Hunting units: Idaho is bundled and always mounted; downloaded states mount only when the layer is on and
+  // their area is in view (each is a source plus layers, and all fifty can be downloaded).
+  const huntVisible = useLayersStore((s) => s.overlayVisibility.huntUnits);
+  const setOverlayVisible = useLayersStore((s) => s.setOverlayVisible);
+  const huntDisclaimerAccepted = useHuntUnitStore((s) => s.disclaimerAccepted);
+  const acceptHuntDisclaimer = useHuntUnitStore((s) => s.acceptDisclaimer);
+  const staleAccepted = useHuntUnitStore((s) => s.staleAccepted);
+  const acceptStale = useHuntUnitStore((s) => s.acceptStale);
+  const installedHunt = useHuntUnitStore((s) => s.installed);
+  const huntActiveSets = useHuntUnitStore((s) => s.activeSets);
+  const huntSources = useMemo<HuntUnitSource[]>(() => {
+    const sources: HuntUnitSource[] = [
+      { state: IDAHO_HUNT_STATE, data: IDAHO_UNITS_DATA, activeSet: resolveActiveSet(IDAHO_HUNT_STATE, undefined) },
+    ];
+    if (!huntVisible) return sources;
+    for (const info of huntStatesInView(Object.values(installedHunt), viewBox)) {
+      if (info.state === IDAHO_HUNT_STATE.state || !huntUnitsExist(info.state)) continue; // a cleared cache leaves a stale record
+      sources.push({ state: info, data: huntUnitsUri(info.state), activeSet: resolveActiveSet(info, huntActiveSets[info.state]) });
+    }
+    return sources;
+  }, [huntVisible, installedHunt, huntActiveSets, viewBox]);
+  // Layers whose source data is 3+ years old must be accepted before they're used — including ones downloaded earlier
+  // that have since aged past the line, and bundled Idaho.
+  const huntInfos = useMemo(() => [IDAHO_HUNT_STATE, ...Object.values(installedHunt)], [installedHunt]);
+  const staleUnaccepted = useMemo(() => unacceptedStale(huntInfos, staleAccepted), [huntInfos, staleAccepted]);
+  const innerMapRef = useRef<MapRef | null>(null);
+  const setMapRef = useCallback(
+    (instance: MapRef | null) => {
+      assignRef(innerMapRef, instance);
+      assignRef(mapRef, instance);
+    },
+    [mapRef]
+  );
 
   // Which per-cell packs the on-screen overlays need, for the "load as I pan" loader.
   const wantedPacks = useMemo<PackLayerId[]>(() => {
@@ -310,20 +373,22 @@ export function MapScreenMap({
     });
   }
 
-  function handleHuntUnitPress(event: {
-    nativeEvent: PressEventWithFeatures;
-    stopPropagation?: () => void;
-  }) {
+  function handleHuntUnitPress(state: HuntStateInfo, event: HuntUnitPressEvent) {
     event.stopPropagation?.();
     const p = event.nativeEvent.features[0]?.properties;
-    if (!p || typeof p.label !== 'string') return;
+    if (!p || typeof p.title !== 'string') return;
+    const str = (value: unknown) => (typeof value === 'string' && value ? value : null);
     setSelected({
       kind: 'huntUnit',
-      label: p.label,
-      isUnit: p.isUnit !== false,
-      elkZone: (p.elkZone as string | null) ?? null,
-      deerUrl: (p.deerUrl as string | null) ?? null,
-      elkUrl: (p.elkUrl as string | null) ?? null,
+      state,
+      setId: typeof p.set === 'string' ? p.set : '',
+      setLabel: state.sets.find((set) => set.id === p.set)?.label ?? 'Hunting units',
+      title: p.title,
+      note: str(p.note),
+      url: str(p.url),
+      urlLabel: str(p.urlLabel),
+      url2: str(p.url2),
+      url2Label: str(p.url2Label),
     });
   }
 
@@ -354,7 +419,7 @@ export function MapScreenMap({
   return (
     <View style={styles.container}>
       <Map
-        ref={mapRef}
+        ref={setMapRef}
         style={styles.map}
         mapStyle={EMPTY_STYLE}
         logo={false}
@@ -364,7 +429,15 @@ export function MapScreenMap({
         scaleBarPosition={{ bottom: scaleBarBottom, left: 12 }}
         onPress={handlePress}
         onLongPress={handleLongPress}
+        onDidFinishLoadingMap={() => {
+          // The first region-change event isn't guaranteed to fire for the initial camera, so ask for the view.
+          innerMapRef.current
+            ?.getViewState()
+            .then(updateCellWindow)
+            .catch((err) => console.warn('Could not read the initial map view', err));
+        }}
         onRegionDidChange={(event) => {
+          updateCellWindow(event.nativeEvent);
           onAutoLoadView(event.nativeEvent);
           onViewStateChange?.(event.nativeEvent);
         }}
@@ -433,7 +506,7 @@ export function MapScreenMap({
           privateOpacity={privateOpacity}
           onPress={overlayPressEnabled ? handleLandPress : undefined}
         />
-        {packCells
+        {mountedPackCells
           .filter((cell) => cell.layer === 'land')
           .map((cell) => (
             <LandLayers
@@ -471,7 +544,7 @@ export function MapScreenMap({
           />
         </GeoJSONSource>
 
-        {packCells
+        {mountedPackCells
           .filter((cell) => cell.layer === 'osm')
           .map((cell) => (
             <OsmLayers
@@ -491,7 +564,7 @@ export function MapScreenMap({
           opacity={mvumOpacity}
           onPress={overlayPressEnabled ? handleMvumPress : undefined}
         />
-        {packCells
+        {mountedPackCells
           .filter((cell) => cell.layer === 'mvum')
           .map((cell) => (
             <MvumLayers
@@ -504,7 +577,7 @@ export function MapScreenMap({
             />
           ))}
 
-        {packCells
+        {mountedPackCells
           .filter((cell) => cell.layer === 'trails')
           .map((cell) => (
             <TrailsLayers
@@ -519,6 +592,7 @@ export function MapScreenMap({
           ))}
 
         <HuntUnitLayers
+          sources={huntSources}
           visible={overlayVisibility.huntUnits}
           opacity={overlayOpacity.huntUnits}
           showLabels={showLabels}
@@ -539,7 +613,7 @@ export function MapScreenMap({
           showLabels={showLabels}
           onPress={overlayPressEnabled ? handlePoiPress : undefined}
         />
-        {packCells
+        {mountedPackCells
           .filter((cell) => cell.layer === 'poi')
           .map((cell) => (
             <PoiLayers
@@ -681,16 +755,28 @@ export function MapScreenMap({
         />
       )}
 
+      <HuntUnitDisclaimerModal
+        visible={huntVisible && (!huntDisclaimerAccepted || staleUnaccepted.length > 0)}
+        showGeneral={!huntDisclaimerAccepted}
+        notices={staleUnaccepted}
+        onAccept={() => {
+          acceptHuntDisclaimer();
+          acceptStale(acceptanceFor(huntInfos));
+        }}
+        onDecline={() => setOverlayVisible('huntUnits', false)}
+      />
+
       {selected?.kind === 'huntUnit' && (
         <InfoCard
-          eyebrow={selected.isUnit ? 'Idaho hunt unit' : 'Not a hunt unit'}
-          title={selected.label}
-          rows={[selected.elkZone ? `Elk zone: ${selected.elkZone}` : null]}
+          eyebrow={`${selected.state.name} · ${selected.setLabel}`}
+          title={selected.title}
+          rows={[selected.note, staleWarningFor(selected.state, selected.setId), huntUnitDisclaimer(selected.state.name)]}
           actions={[
-            selected.deerUrl ? { label: 'Deer info (IDFG)', url: selected.deerUrl } : null,
-            selected.elkUrl ? { label: 'Elk zone info (IDFG)', url: selected.elkUrl } : null,
+            selected.url ? { label: selected.urlLabel ?? 'More information', url: selected.url } : null,
+            selected.url2 ? { label: selected.url2Label ?? 'More information', url: selected.url2 } : null,
+            { label: `${selected.state.name} hunting regulations`, url: selected.state.regsUrl },
           ]}
-          source={`${HUNT_UNITS_META.source} · fetched ${HUNT_UNITS_META.fetchedAt.slice(0, 10)}. ${HUNT_UNIT_DISCLAIMER}`}
+          source={huntUnitSourceNote(selected.state, selected.setId)}
           onClose={() => setSelected(null)}
         />
       )}

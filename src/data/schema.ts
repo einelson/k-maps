@@ -3,7 +3,14 @@
  * split into numbered migrations once the schema needs to change on devices
  * that already have data.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
+
+/**
+ * v3 added `track_data` (time and altitude per recorded point) and v4 added `recording_session` /
+ * `recording_fixes` (the in-progress recording, written by the background location task). Their
+ * `CREATE TABLE IF NOT EXISTS` statements in CREATE_SCHEMA_SQL are the whole migrations, so there are no
+ * MIGRATE_V3_SQL / MIGRATE_V4_SQL.
+ */
 
 /**
  * v2: `features_fts` (external-content) was only ever written on create, so
@@ -55,6 +62,26 @@ CREATE TABLE IF NOT EXISTS photos (
   id INTEGER PRIMARY KEY,
   feature_id INTEGER REFERENCES features(id) ON DELETE CASCADE,
   path TEXT
+);
+
+CREATE TABLE IF NOT EXISTS track_data (
+  feature_id INTEGER PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+  data TEXT NOT NULL
+);
+
+-- The recording in progress: at most one row, and the fixes the background task has appended so far.
+-- Kept in SQLite (not memory) so a recording survives the app being closed or killed mid-track.
+CREATE TABLE IF NOT EXISTS recording_session (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  started_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recording_fixes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  time INTEGER NOT NULL,
+  lon REAL NOT NULL,
+  lat REAL NOT NULL,
+  altitude REAL
 );
 
 CREATE TABLE IF NOT EXISTS coverage (

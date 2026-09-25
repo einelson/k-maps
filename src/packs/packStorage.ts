@@ -36,11 +36,16 @@ export function writePackCell(
   cy: number,
   fc: FeatureCollection
 ): number {
+  return writePackCellText(layer, cx, cy, JSON.stringify(fc));
+}
+
+/** Like `writePackCell` for JSON that is already serialized (a region pack's cell files). */
+export function writePackCellText(layer: PackLayerId, cx: number, cy: number, json: string): number {
   const directory = layerDirectory(layer);
   if (!directory.exists) directory.create({ intermediates: true, idempotent: true });
   const file = cellFile(layer, cx, cy);
   file.create({ overwrite: true, intermediates: true });
-  file.write(JSON.stringify(fc));
+  file.write(json);
   return file.size;
 }
 

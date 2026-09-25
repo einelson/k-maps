@@ -26,7 +26,27 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT"],
+          "data": [
+            { "scheme": "content", "mimeType": "application/gpx+xml" },
+            { "scheme": "content", "mimeType": "application/x-gpx+xml" },
+            { "scheme": "content", "mimeType": "application/gpx" },
+            { "scheme": "content", "mimeType": "application/vnd.google-earth.kml+xml" },
+            { "scheme": "content", "mimeType": "application/vnd.google-earth.kmz" },
+            { "scheme": "content", "mimeType": "application/geo+json" },
+            { "scheme": "content", "mimeType": "application/vnd.geo+json" },
+            { "scheme": "file", "mimeType": "application/gpx+xml" },
+            { "scheme": "file", "mimeType": "application/vnd.google-earth.kml+xml" },
+            { "scheme": "file", "mimeType": "application/vnd.google-earth.kmz" },
+            { "scheme": "file", "mimeType": "application/geo+json" }
+          ]
+        }
       ]
     },
     "web": {
@@ -38,7 +58,9 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "K-Maps shows your position on the map and records GPS tracks when you ask it to."
+          "locationWhenInUsePermission": "K-Maps shows your position on the map and records GPS tracks when you ask it to.",
+          "isAndroidForegroundServiceEnabled": true,
+          "isAndroidBackgroundLocationEnabled": false
         }
       ],
       "expo-sharing",

@@ -49,7 +49,7 @@ export function AddMenu({ open, onToggle, activeTool, recording, onSelectTool, o
             />
           ))}
           <MenuItem
-            label={recording ? 'Stop recording' : 'Record track'}
+            label={recording ? 'Track stats' : 'Record track'}
             icon={recording ? 'stop' : 'record'}
             iconColor={colors.danger}
             danger={recording}

@@ -6,12 +6,14 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { listFeatures } from '../data/featuresRepo';
+import { flattenFolders } from '../data/folderTree';
 import { listFolders } from '../data/foldersRepo';
-import { createBackup, exportFeatures, importFile } from '../data/importExport';
+import { createBackup, exportFeatures } from '../data/importExport';
 import type { ExportFormat } from '../data/importTypes';
 import type { Folder } from '../data/types';
 import { useFiltersStore } from '../state/useFiltersStore';
 import { Text, useThemedStyles, type ThemeColors } from '../theme';
+import { runImportFlow } from './importFlow';
 
 const FORMATS: { id: ExportFormat; label: string }[] = [
   { id: 'gpx', label: 'GPX' },
@@ -48,7 +50,14 @@ export function ImportExportScreen() {
 
   async function handleImport() {
     const result = await DocumentPicker.getDocumentAsync({
-      type: ['application/gpx+xml', 'application/vnd.google-earth.kml+xml', 'application/geo+json', 'application/json', '*/*'],
+      type: [
+        'application/gpx+xml',
+        'application/vnd.google-earth.kml+xml',
+        'application/vnd.google-earth.kmz',
+        'application/geo+json',
+        'application/json',
+        '*/*',
+      ],
       copyToCacheDirectory: true,
     });
     if (result.canceled || !result.assets[0]) return;
@@ -56,8 +65,13 @@ export function ImportExportScreen() {
     setBusy(true);
     try {
       const asset = result.assets[0];
-      const { count, folderName } = await importFile(db, asset.uri, asset.name);
-      Alert.alert('Import complete', `Added ${count} item${count === 1 ? '' : 's'} to "${folderName}".`);
+      const imported = await runImportFlow(db, asset.uri, asset.name, { confirm: false });
+      if (imported) {
+        Alert.alert(
+          'Import complete',
+          `Added ${imported.count} item${imported.count === 1 ? '' : 's'} to "${imported.folderName}".`
+        );
+      }
     } catch (err) {
       Alert.alert('Import failed', err instanceof Error ? err.message : String(err));
     } finally {
@@ -83,7 +97,7 @@ export function ImportExportScreen() {
     >
       <Text style={styles.sectionTitle}>Import</Text>
       <Pressable style={styles.button} onPress={handleImport} disabled={busy}>
-        <Text style={styles.buttonText}>Import GPX / KML / GeoJSON…</Text>
+        <Text style={styles.buttonText}>Import GPX / KML / KMZ / GeoJSON…</Text>
       </Pressable>
 
       <Text style={styles.sectionTitle}>Export format</Text>
@@ -130,17 +144,22 @@ export function ImportExportScreen() {
       {folders.length === 0 ? (
         <Text style={styles.emptyNote}>No folders yet.</Text>
       ) : (
-        folders.map((folder) => (
-          <Pressable
-            key={folder.id}
-            style={styles.folderRow}
-            disabled={busy}
-            onPress={() => runExport(folder.name, () => listFeatures(db, { folderIds: [folder.id] }))}
-          >
-            <View style={[styles.colorDot, { backgroundColor: folder.color ?? '#999' }]} />
-            <Text style={styles.folderName}>{folder.name}</Text>
-          </Pressable>
-        ))
+        <>
+          <Text style={styles.emptyNote}>A folder&apos;s export includes the folders inside it.</Text>
+          {flattenFolders(folders).map(({ folder, depth, label }) => (
+            <Pressable
+              key={folder.id}
+              style={[styles.folderRow, { paddingLeft: depth * 20 }]}
+              disabled={busy}
+              onPress={() => runExport(folder.name, () => listFeatures(db, { folderIds: [folder.id] }))}
+            >
+              <View style={[styles.colorDot, { backgroundColor: folder.color ?? '#999' }]} />
+              <Text style={styles.folderName} accessibilityLabel={label}>
+                {folder.name}
+              </Text>
+            </Pressable>
+          ))}
+        </>
       )}
 
       <Text style={styles.sectionTitle}>Backup</Text>

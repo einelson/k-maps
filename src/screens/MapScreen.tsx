@@ -15,7 +15,7 @@ import { formatCoordinate } from '../features/coordinates';
 import { computeGeometryMetrics } from '../features/measure';
 import { DEFAULT_PIN_COLOR, DEFAULT_PIN_STYLE } from '../features/pinStyles';
 import { canRemoveVertex, geometryToVertices, verticesToGeometry } from '../features/vertexEdit';
-import { startTrackRecording, stopTrackRecording } from '../features/trackRecorder';
+import { discardTrackRecording, finishTrackRecording, startTrackRecording } from '../features/trackRecorder';
 import { EditLayers } from '../map/EditLayers';
 import { DEFAULT_CENTER, DEFAULT_ZOOM, MapScreenMap } from '../map/MapView';
 import { PinDraftLayers } from '../map/PinLayers';
@@ -37,6 +37,8 @@ import { FilterControl } from './components/FilterControl';
 import { LayersPanel } from './components/LayersPanel';
 import { MAP_BUTTON_SIZE, MapButton } from './components/MapButton';
 import { PinCard, type PinDraft } from './components/PinCard';
+import { RecordingButton } from './components/RecordingButton';
+import { RecordingPanel } from './components/RecordingPanel';
 
 /** Which floating panel is open over the map. Only one at a time. */
 type Panel = 'none' | 'layers' | 'add';
@@ -124,6 +126,8 @@ export function MapScreen() {
   const showUserLocation = useLayersStore((s) => s.showUserLocation);
   const setShowUserLocation = useLayersStore((s) => s.setShowUserLocation);
   const trackRecording = useTrackRecordingStore((s) => s.recording);
+  const [recordingPanelOpen, setRecordingPanelOpen] = useState(false);
+  const [recordingBusy, setRecordingBusy] = useState(false);
   const trackPoints = useTrackRecordingStore((s) => s.points);
   const showLabels = useLayersStore((s) => s.showLabels);
   const coordinateFormat = useSettingsStore((s) => s.coordinateFormat);
@@ -355,24 +359,46 @@ export function MapScreen() {
   }
 
   async function handleToggleTrack() {
+    // While recording, the "+" menu's record item opens the panel instead of ending the track outright.
     if (trackRecording) {
-      const points = stopTrackRecording();
-      if (points.length >= 2) {
-        await createFeature(db, {
-          name: `Track ${new Date().toLocaleString()}`,
-          geometry: { type: 'LineString', coordinates: points },
-          source: 'track',
-        });
-        reloadSavedFeatures();
-        Alert.alert('Track saved', `Saved a track with ${points.length} points.`);
-      } else {
-        Alert.alert('Track discarded', 'Not enough points were recorded to save a track.');
-      }
+      setRecordingPanelOpen(true);
       return;
     }
-
-    const result = await startTrackRecording();
+    const result = await startTrackRecording(db);
     if (!result.ok) Alert.alert('Cannot record track', result.reason);
+  }
+
+  async function handleEndRecording() {
+    setRecordingBusy(true);
+    try {
+      // Saved from the database (where every fix has been stored, including any recorded while the app was
+      // closed) and only cleared once the track is safely saved. The dashboard it opens on is where the
+      // track gets a proper name, folder and tags.
+      const featureId = await finishTrackRecording(db);
+      setRecordingPanelOpen(false);
+      if (featureId == null) {
+        Alert.alert('Track discarded', 'Not enough points were recorded to save a track.');
+      } else {
+        reloadSavedFeatures();
+        navigation.navigate('FeatureDetail', { featureId });
+      }
+    } catch (err) {
+      Alert.alert('Could not save the track', err instanceof Error ? err.message : String(err));
+    } finally {
+      setRecordingBusy(false);
+    }
+  }
+
+  async function handleDeleteRecording() {
+    setRecordingBusy(true);
+    try {
+      await discardTrackRecording(db);
+      setRecordingPanelOpen(false);
+    } catch (err) {
+      Alert.alert('Could not delete the recording', err instanceof Error ? err.message : String(err));
+    } finally {
+      setRecordingBusy(false);
+    }
   }
 
   function handleSelectTool(tool: Exclude<DrawTool, 'none'>) {
@@ -551,6 +577,7 @@ export function MapScreen() {
             onPress={handleLocate}
             onLongPress={() => setShowUserLocation(false)}
           />
+          {trackRecording && <RecordingButton onPress={() => setRecordingPanelOpen(true)} />}
         </View>
 
         {openPanel === 'layers' && (
@@ -575,6 +602,14 @@ export function MapScreen() {
             saving={savingPin}
           />
         )}
+
+        <RecordingPanel
+          visible={trackRecording && recordingPanelOpen}
+          onClose={() => setRecordingPanelOpen(false)}
+          onEnd={handleEndRecording}
+          onDelete={handleDeleteRecording}
+          busy={recordingBusy}
+        />
 
         {canAdd && (
           <AddMenu
@@ -603,7 +638,7 @@ const makeStyles = (c: ThemeColors) =>
     mapArea: { flex: 1 },
     // Right edge is set at render time: it stops short of the layers button.
     filterControl: { position: 'absolute', left: EDGE },
-    rightColumn: { position: 'absolute', right: EDGE, gap: 8 },
+    rightColumn: { position: 'absolute', right: EDGE, gap: 8, alignItems: 'flex-end' },
     crosshair: {
       position: 'absolute',
       top: '50%',

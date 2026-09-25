@@ -9,6 +9,10 @@ export const DATABASE_NAME = 'kmaps.db';
  * pattern so re-launching the app is a no-op once the schema is current.
  */
 export async function migrateDbIfNeeded(db: SQLiteDatabase): Promise<void> {
+  // The background location task writes to this file from its own connection while the app is open; with
+  // WAL that never blocks reads, but two writers at once would otherwise fail straight away with "locked".
+  await db.execAsync('PRAGMA busy_timeout = 5000');
+
   const row = await db.getFirstAsync<{ user_version: number }>(
     'PRAGMA user_version'
   );

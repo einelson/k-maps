@@ -11,12 +11,17 @@ import { BASE_MAP_TILE_URLS, USGS_ATTRIBUTION, USGS_MAX_NATIVE_ZOOM } from '../m
 import { ESTIMATED_BYTES_PER_CELL, lonLatToCell } from '../downloads/cells';
 import { listCoverage } from '../downloads/coverageRepo';
 import { downloadCell } from '../downloads/downloader';
+import { formatBytes } from '../downloads/formatBytes';
 import { deletePackData, downloadPackCell } from '../downloads/packDownloader';
+import { useRegionManifest } from '../downloads/useRegionManifest';
 import type { LayerId } from '../downloads/types';
 import type { PackLayerId } from '../packs/types';
 import { useDownloadStore } from '../state/useDownloadStore';
 import { usePackStore } from '../state/usePackStore';
+import { useRegionPackStore } from '../state/useRegionPackStore';
 import { Text, useThemedStyles, type ThemeColors } from '../theme';
+import { HuntUnitsSection } from './components/HuntUnitsSection';
+import { RegionPacksSection } from './components/RegionPacksSection';
 
 const TILE_LAYER_OPTIONS: { id: LayerId; label: string }[] = [
   { id: 'topo', label: 'Topo' },
@@ -24,7 +29,7 @@ const TILE_LAYER_OPTIONS: { id: LayerId; label: string }[] = [
   { id: 'hybrid', label: 'Hybrid' },
 ];
 
-/** Vector overlay datasets fetched straight from their public services, per cell (no hosted packs needed). */
+/** Vector overlay datasets fetched straight from their public services, one cell at a time (region packs are the bulk route). */
 const PACK_OPTIONS: { id: PackLayerId; label: string; note: string; estimateBytes: number }[] = [
   {
     id: 'land',
@@ -68,11 +73,6 @@ const PACK_LABELS: Record<string, string> = {
 /** USGS tiles don't exist past this (they 404), so offering more would just spam the shared servers. */
 const ZOOM_OPTIONS = [14, 15, USGS_MAX_NATIVE_ZOOM];
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
-  return `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 1 : 0)} MB`;
-}
-
 export function DownloadsScreen() {
   const appDb = useSQLiteContext();
   const styles = useThemedStyles(makeStyles);
@@ -88,6 +88,8 @@ export function DownloadsScreen() {
   const maxZoom = useDownloadStore((s) => s.maxZoom);
   const setMaxZoom = useDownloadStore((s) => s.setMaxZoom);
   const bumpPacks = usePackStore((s) => s.bump);
+  const { manifest, retry: retryManifest } = useRegionManifest(); // one fetch, shared by the two pack sections
+  const forgetRegionLayer = useRegionPackStore((s) => s.forgetLayer);
 
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [errors, setErrors] = useState<string[]>([]);
@@ -101,6 +103,10 @@ export function DownloadsScreen() {
       reloadCoverage();
     }, [reloadCoverage])
   );
+  const onRegionPacksChanged = useCallback(async () => {
+    await reloadCoverage();
+    bumpPacks(); // the map picks the newly installed cells up straight away
+  }, [reloadCoverage, bumpPacks]);
 
   // One outline per cell: green if picked, otherwise blue when any layer is complete, amber when only partial.
   const overlayCells = useMemo<CellOverlayEntry[]>(() => {
@@ -229,6 +235,7 @@ export function DownloadsScreen() {
           style: 'destructive',
           onPress: async () => {
             await deletePackData(appDb, layer as PackLayerId);
+            forgetRegionLayer(layer as PackLayerId);
             await reloadCoverage();
             bumpPacks();
           },
@@ -265,6 +272,16 @@ export function DownloadsScreen() {
           downloaded, amber = partial.
         </Text>
 
+        <RegionPacksSection
+          manifest={manifest}
+          onRetry={retryManifest}
+          coverage={coverage}
+          labels={PACK_LABELS}
+          onChanged={onRegionPacksChanged}
+        />
+
+        <HuntUnitsSection manifest={manifest} onRetry={retryManifest} />
+
         <Text style={styles.sectionTitle}>Map tiles</Text>
         <View style={styles.layerRow}>
           {TILE_LAYER_OPTIONS.map((layer) => (
@@ -296,9 +313,10 @@ export function DownloadsScreen() {
         <Text style={styles.sectionTitle}>Overlay data</Text>
         <Text style={styles.hint}>
           Fetched straight from the public services for each selected cell, so land, forest roads,
-          trails, POIs and roads/trails work anywhere in the US. The southwest Idaho starter
-          region is already built in, and land, forest roads and trails also load on their own as
-          you pan the main map while online (Layers → &ldquo;Load land data as I pan&rdquo;).
+          trails, POIs and roads/trails work anywhere in the US. Region packs above are the quick
+          way to get a whole region. The southwest Idaho starter region is already built in, and
+          land, forest roads and trails also load on their own as you pan the main map while online
+          (Layers → &ldquo;Load land data as I pan&rdquo;).
         </Text>
         {PACK_OPTIONS.map((option) => {
           const active = selectedPackLayers.includes(option.id);

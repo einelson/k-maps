@@ -83,7 +83,7 @@ describe('featuresToKml', () => {
 describe('KML export -> import round trip', () => {
   it('preserves a point with name and notes', () => {
     const [parsed] = parseKml(featuresToKml([makeFeature(POINT, { name: 'Camp', notes: 'Near water' })]));
-    expect(parsed).toEqual({ name: 'Camp', notes: 'Near water', geometry: POINT, folderPath: [] });
+    expect(parsed).toEqual({ name: 'Camp', notes: 'Near water', geometry: POINT, folderPath: [], color: null });
   });
 
   it('preserves a line exactly (lon/lat order, vertex order, altitude dropped)', () => {
@@ -112,10 +112,15 @@ describe('KML export -> import round trip', () => {
 
   it('round-trips special characters and multi-line notes', () => {
     const name = `A & B <c> "d" 'e'`;
-    const notes = 'line one\nline two & <i>italics</i>';
+    const notes = 'line one\nline two & "quotes" & x < 5';
     const [parsed] = parseKml(featuresToKml([makeFeature(POINT, { name, notes })]));
     expect(parsed.name).toBe(name);
     expect(parsed.notes).toBe(notes);
+  });
+
+  it('strips tag-shaped markup from notes on re-import, since KML descriptions are usually HTML', () => {
+    const [parsed] = parseKml(featuresToKml([makeFeature(POINT, { notes: 'see <i>this</i> spot' })]));
+    expect(parsed.notes).toBe('see this spot');
   });
 
   it('round-trips a mixed set in order', () => {
@@ -237,11 +242,18 @@ describe('parseKml: geometry parsing', () => {
     expect(parsed[0].name).toBe('styled');
   });
 
-  it('keeps a CDATA description as raw text (typical of Google My Maps exports)', () => {
+  it('turns a CDATA HTML description into plain text (typical of Google My Maps exports)', () => {
     const [f] = parseKml(
-      kmlDoc(`<Placemark><description><![CDATA[<b>Bold</b> & <a href="x">link</a>]]></description>${point(1, 2)}</Placemark>`)
+      kmlDoc(`<Placemark><description><![CDATA[<b>Bold</b> & <a href="x">link</a><br>Second line]]></description>${point(1, 2)}</Placemark>`)
     );
-    expect(f.notes).toBe('<b>Bold</b> & <a href="x">link</a>');
+    expect(f.notes).toBe('Bold & link\nSecond line');
+  });
+
+  it('turns an entity-escaped HTML description into plain text too', () => {
+    const [f] = parseKml(
+      kmlDoc(`<Placemark><description>&lt;p&gt;Water at &amp;amp; below&lt;/p&gt;</description>${point(1, 2)}</Placemark>`)
+    );
+    expect(f.notes).toBe('Water at & below');
   });
 
   it('decodes the five predefined XML entities in names', () => {
@@ -288,20 +300,154 @@ describe('parseKml: geometry parsing', () => {
     expect((f.geometry as { coordinates: unknown[] }).coordinates).toHaveLength(1);
   });
 
-  it('does not import <MultiGeometry> placemarks (unsupported: they are skipped, not flattened)', () => {
-    // Documents current behaviour. If MultiGeometry support is added, replace with real expectations.
+  it('splits a <MultiGeometry> into one feature per part, sharing name, notes and folder', () => {
     const parsed = parseKml(
-      kmlDoc(`<Placemark><name>multi</name><MultiGeometry>${point(1, 2)}
-        <LineString><coordinates>1,2 3,4</coordinates></LineString></MultiGeometry></Placemark>`)
+      kmlDoc(`<Folder><name>Trip</name><Placemark><name>multi</name><description>d</description><MultiGeometry>${point(1, 2)}
+        <LineString><coordinates>1,2 3,4</coordinates></LineString></MultiGeometry></Placemark></Folder>`)
     );
-    expect(parsed).toEqual([]);
+    expect(parsed.map((f) => [f.name, f.notes, f.folderPath, f.geometry.type])).toEqual([
+      ['multi', 'd', ['Trip'], 'Point'],
+      ['multi', 'd', ['Trip'], 'LineString'],
+    ]);
   });
 
-  it('a placemark with both Point and LineString prefers the Point', () => {
-    const [f] = parseKml(
+  it('imports several points inside one MultiGeometry, and nested MultiGeometry', () => {
+    const parsed = parseKml(
+      kmlDoc(`<Placemark><name>m</name><MultiGeometry>${point(1, 2)}${point(3, 4)}
+        <MultiGeometry>${point(5, 6)}</MultiGeometry></MultiGeometry></Placemark>`)
+    );
+    expect(parsed.map((f) => f.geometry)).toEqual([
+      { type: 'Point', coordinates: [1, 2] },
+      { type: 'Point', coordinates: [3, 4] },
+      { type: 'Point', coordinates: [5, 6] },
+    ]);
+  });
+
+  it('a placemark with both a Point and a LineString imports both', () => {
+    const parsed = parseKml(
       kmlDoc(`<Placemark>${point(9, 8)}<LineString><coordinates>1,2 3,4</coordinates></LineString></Placemark>`)
     );
-    expect(f.geometry.type).toBe('Point');
+    expect(parsed.map((f) => f.geometry.type)).toEqual(['Point', 'LineString']);
+  });
+
+  it('drops an unusable part of a MultiGeometry without losing the rest', () => {
+    const parsed = parseKml(
+      kmlDoc(`<Placemark><MultiGeometry><LineString><coordinates>1,2</coordinates></LineString>${point(1, 2)}</MultiGeometry></Placemark>`)
+    );
+    expect(parsed.map((f) => f.geometry.type)).toEqual(['Point']);
+  });
+});
+
+describe('parseKml: structure', () => {
+  it('reads placemarks whose elements carry attributes (id on Placemark, lang on name)', () => {
+    const [f] = parseKml(
+      kmlDoc(`<Placemark id="ID_1"><name xml:lang="en">Camp</name>${point(1, 2)}</Placemark>`)
+    );
+    expect(f.name).toBe('Camp');
+  });
+
+  it('does not turn a nested <Document> into a folder level', () => {
+    const [f] = parseKml(
+      kmlDoc(`<Document><name>Inner</name><Folder><name>Layer</name><Placemark>${point(1, 2)}</Placemark></Folder></Document>`)
+    );
+    expect(f.folderPath).toEqual(['Layer']);
+  });
+
+  it('reads placemarks that sit directly under <kml> with no Document', () => {
+    const parsed = parseKml(
+      `<kml xmlns="http://www.opengis.net/kml/2.2"><Placemark><name>bare</name>${point(1, 2)}</Placemark></kml>`
+    );
+    expect(parsed.map((f) => f.name)).toEqual(['bare']);
+  });
+});
+
+// KML colors are aabbggrr; palette targets: red #e11d48, blue #3b82f6, green #22c55e.
+describe('parseKml: colors', () => {
+  const styleDoc = (styles: string, placemark: string) => parseKml(kmlDoc(`${styles}${placemark}`));
+
+  it('takes a pin color from the shared style its styleUrl points at (IconStyle tint)', () => {
+    const [f] = styleDoc(
+      `<Style id="pin"><IconStyle><color>fff6823b</color></IconStyle></Style>`, // rgb 3b82f6 -> blue
+      `<Placemark><styleUrl>#pin</styleUrl>${point(1, 2)}</Placemark>`
+    );
+    expect(f.color).toBe('#3b82f6');
+  });
+
+  it('takes a line color from LineStyle', () => {
+    const [f] = styleDoc(
+      `<Style id="l"><LineStyle><color>ff4818e1</color><width>3</width></LineStyle></Style>`, // rgb e11848 -> red
+      `<Placemark><styleUrl>#l</styleUrl><LineString><coordinates>1,2 3,4</coordinates></LineString></Placemark>`
+    );
+    expect(f.color).toBe('#e11d48');
+  });
+
+  it('colors an area by its outline, falling back to the fill', () => {
+    const ring = `<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 1,0 1,1 0,0</coordinates></LinearRing></outerBoundaryIs></Polygon>`;
+    const [outlined] = styleDoc(
+      `<Style id="a"><LineStyle><color>ff4818e1</color></LineStyle><PolyStyle><color>7fc5c522</color></PolyStyle></Style>`,
+      `<Placemark><styleUrl>#a</styleUrl>${ring}</Placemark>`
+    );
+    expect(outlined.color).toBe('#e11d48');
+    const [filled] = styleDoc(
+      `<Style id="b"><PolyStyle><color>ff5ec522</color></PolyStyle></Style>`, // rgb 22c55e -> green
+      `<Placemark><styleUrl>#b</styleUrl>${ring}</Placemark>`
+    );
+    expect(filled.color).toBe('#22c55e');
+  });
+
+  it('follows a StyleMap to its normal style, not the highlight one', () => {
+    const [f] = styleDoc(
+      `<StyleMap id="m"><Pair><key>normal</key><styleUrl>#n</styleUrl></Pair><Pair><key>highlight</key><styleUrl>#h</styleUrl></Pair></StyleMap>
+       <Style id="n"><IconStyle><color>ff5ec522</color></IconStyle></Style>
+       <Style id="h"><IconStyle><color>ff4818e1</color></IconStyle></Style>`,
+      `<Placemark><styleUrl>#m</styleUrl>${point(1, 2)}</Placemark>`
+    );
+    expect(f.color).toBe('#22c55e');
+  });
+
+  it('prefers an inline <Style> over the styleUrl', () => {
+    const [f] = styleDoc(
+      `<Style id="pin"><IconStyle><color>ff4818e1</color></IconStyle></Style>`,
+      `<Placemark><styleUrl>#pin</styleUrl><Style><IconStyle><color>ff5ec522</color></IconStyle></Style>${point(1, 2)}</Placemark>`
+    );
+    expect(f.color).toBe('#22c55e');
+  });
+
+  it('finds styles declared inside a folder and accepts a file.kml#id styleUrl', () => {
+    const parsed = parseKml(
+      kmlDoc(`<Folder><Style id="s"><IconStyle><color>ff5ec522</color></IconStyle></Style>
+        <Placemark><styleUrl>doc.kml#s</styleUrl>${point(1, 2)}</Placemark></Folder>`)
+    );
+    expect(parsed[0].color).toBe('#22c55e');
+  });
+
+  it('gives null for white (no tint), a fully transparent color, an unknown style and no style', () => {
+    const whiteAndTransparent = `<Style id="w"><IconStyle><color>ffffffff</color></IconStyle></Style>
+      <Style id="t"><IconStyle><color>00000000</color></IconStyle></Style>`;
+    const parsed = parseKml(
+      kmlDoc(`${whiteAndTransparent}
+        <Placemark><styleUrl>#w</styleUrl>${point(1, 2)}</Placemark>
+        <Placemark><styleUrl>#t</styleUrl>${point(1, 2)}</Placemark>
+        <Placemark><styleUrl>#missing</styleUrl>${point(1, 2)}</Placemark>
+        <Placemark>${point(1, 2)}</Placemark>`)
+    );
+    expect(parsed.map((f) => f.color)).toEqual([null, null, null, null]);
+  });
+
+  it('survives a StyleMap that points at itself', () => {
+    const [f] = styleDoc(
+      `<StyleMap id="loop"><Pair><key>normal</key><styleUrl>#loop</styleUrl></Pair></StyleMap>`,
+      `<Placemark><styleUrl>#loop</styleUrl>${point(1, 2)}</Placemark>`
+    );
+    expect(f.color).toBeNull();
+  });
+
+  it('gives each part of a MultiGeometry the color that fits its own type', () => {
+    const parsed = styleDoc(
+      `<Style id="s"><IconStyle><color>ff5ec522</color></IconStyle><LineStyle><color>ff4818e1</color></LineStyle></Style>`,
+      `<Placemark><styleUrl>#s</styleUrl><MultiGeometry>${point(1, 2)}<LineString><coordinates>1,2 3,4</coordinates></LineString></MultiGeometry></Placemark>`
+    );
+    expect(parsed.map((f) => f.color)).toEqual(['#22c55e', '#e11d48']);
   });
 });
 

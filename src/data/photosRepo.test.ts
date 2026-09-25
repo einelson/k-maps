@@ -117,6 +117,7 @@ class FakeDb {
     if (s.startsWith('SELECT * FROM photos WHERE feature_id IN')) {
       return this.photos.filter((p) => params.includes(p.feature_id)) as T[];
     }
+    if (s.startsWith('SELECT data FROM track_data')) return []; // no recorded-track data in these tests
     if (s.startsWith('SELECT feature_id, COUNT(*)')) {
       const counts = new Map<number, number>();
       for (const p of this.photos) counts.set(p.feature_id, (counts.get(p.feature_id) ?? 0) + 1);
@@ -311,6 +312,8 @@ describe('feature deletion cascades to photos and tags', () => {
     const idx = (prefix: string) => db.log.findIndex((s) => s.startsWith(prefix));
     expect(idx('DELETE FROM photos')).toBeGreaterThanOrEqual(0);
     expect(idx('DELETE FROM feature_tags WHERE feature_id = ?')).toBeGreaterThanOrEqual(0);
+    expect(idx('DELETE FROM track_data')).toBeGreaterThanOrEqual(0);
+    expect(idx('DELETE FROM track_data')).toBeLessThan(idx('DELETE FROM features WHERE id = ?'));
     expect(idx('DELETE FROM photos')).toBeLessThan(idx('DELETE FROM features WHERE id = ?'));
     expect(idx('DELETE FROM feature_tags')).toBeLessThan(idx('DELETE FROM features WHERE id = ?'));
   });

@@ -6,18 +6,21 @@
  * a real file system, database or share sheet; `createBackup` (zip of the real
  * DB + photos) is deliberately not covered because it needs a device.
  */
+import JSZip from 'jszip';
 import * as Sharing from 'expo-sharing';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { LINE, POINT, POLYGON, makeFeature } from '../testing/featureFixtures';
 import { createFeature } from './featuresRepo';
 import { createFolder } from './foldersRepo';
-import { exportFeatures, importFile } from './importExport';
+import { getTrackDataForFeatures, saveTrackData } from './trackDataRepo';
+import { countClosedLines, exportFeatures, importFile, insertParsedImport, parseImportFile } from './importExport';
 
 // jest.mock() calls are hoisted above the imports by babel-plugin-jest-hoist; the
 // factories only touch `mockState` lazily (inside methods), so declaration order is safe.
 const mockState = {
   filesByUri: {} as Record<string, string>,
+  bytesByUri: {} as Record<string, Uint8Array>,
   existing: new Set<string>(),
   written: [] as { uri: string; content: string }[],
   deleted: [] as string[],
@@ -45,6 +48,9 @@ jest.mock('expo-file-system', () => {
     async text() {
       return mockState.filesByUri[this.uri];
     }
+    async bytes() {
+      return mockState.bytesByUri[this.uri] ?? new TextEncoder().encode(mockState.filesByUri[this.uri]);
+    }
   }
   return { File, Paths: { cache: { uri: 'file:///cache' } } };
 });
@@ -53,14 +59,20 @@ jest.mock('expo-sqlite', () => ({ defaultDatabaseDirectory: '/databases' }));
 jest.mock('./db', () => ({ DATABASE_NAME: 'kmaps.db' }));
 jest.mock('./featuresRepo', () => ({ createFeature: jest.fn() }));
 jest.mock('./foldersRepo', () => ({ createFolder: jest.fn() }));
+jest.mock('./trackDataRepo', () => ({ saveTrackData: jest.fn(), getTrackDataForFeatures: jest.fn() }));
 
 const shareAsync = Sharing.shareAsync as jest.Mock;
 const createFolderMock = createFolder as jest.Mock;
 const createFeatureMock = createFeature as jest.Mock;
-const db = {} as SQLiteDatabase;
+const saveTrackDataMock = saveTrackData as jest.Mock;
+const getTrackDataMock = getTrackDataForFeatures as jest.Mock;
+const withTransactionAsync = jest.fn(async (task: () => Promise<void>) => task());
+const db = { withTransactionAsync } as unknown as SQLiteDatabase;
 
 beforeEach(() => {
   mockState.filesByUri = {};
+  mockState.bytesByUri = {};
+  withTransactionAsync.mockClear();
   mockState.existing = new Set();
   mockState.written = [];
   mockState.deleted = [];
@@ -70,11 +82,23 @@ beforeEach(() => {
   let nextFolderId = 100;
   createFolderMock.mockImplementation(async () => nextFolderId++);
   createFeatureMock.mockResolvedValue(1);
+  saveTrackDataMock.mockReset().mockResolvedValue(undefined);
+  getTrackDataMock.mockReset().mockResolvedValue(new Map());
 });
 
 function pick(fileName: string, content: string): [SQLiteDatabase, string, string] {
   const uri = `file:///picked/${fileName}`;
   mockState.filesByUri[uri] = content;
+  return [db, uri, fileName];
+}
+
+async function pickKmz(fileName: string, entries: Record<string, string>): Promise<[SQLiteDatabase, string, string]> {
+  const zip = new JSZip();
+  for (const [name, content] of Object.entries(entries)) zip.file(name, content);
+  const bytes = await zip.generateAsync({ type: 'uint8array' });
+  const uri = `file:///picked/${fileName}`;
+  mockState.bytesByUri[uri] = bytes;
+  mockState.filesByUri[uri] = Buffer.from(bytes).toString('latin1'); // what File.text() makes of a zip: starts "PK"
   return [db, uri, fileName];
 }
 
@@ -150,19 +174,99 @@ describe('importFile: format detection', () => {
     await expect(importFile(...pick(fileName, content))).resolves.toMatchObject({ count: 1 });
   });
 
-  it.each(['notes.txt', 'archive.zip', 'noextension', 'hike.gpx.bak', 'map.kmz', ''])(
-    'rejects unrecognised file name %j before reading anything',
+  it.each(['notes.txt', 'archive.zip', 'noextension', 'hike.gpx.bak', 'map.pdf'])(
+    'rejects unrecognised file %j when its content is not GPX, KML or GeoJSON either',
     async (fileName) => {
-      await expect(importFile(...pick(fileName, gpx))).rejects.toThrow(`Unrecognized file type: ${fileName}`);
+      await expect(importFile(...pick(fileName, 'just some text'))).rejects.toThrow(
+        `Unrecognized file type: ${fileName}`
+      );
       expect(createFolderMock).not.toHaveBeenCalled();
       expect(createFeatureMock).not.toHaveBeenCalled();
     }
   );
 
-  it('parses by extension, not by content (a GPX body in a .kml file yields nothing)', async () => {
-    await expect(importFile(...pick('actually-gpx.kml', gpx))).rejects.toThrow(
+  it.each([
+    ['notes.txt', gpx],
+    ['noextension', kml],
+    ['hike.gpx.bak', geojson],
+    ['document%3A1234', gpx], // an opaque name from a content:// URI
+  ])('sniffs the content of %j instead of trusting its name', async (fileName, content) => {
+    await expect(importFile(...pick(fileName, content))).resolves.toMatchObject({ count: 1 });
+  });
+
+  it('lets content beat a wrong extension (a GPX body in a .kml file is read as GPX)', async () => {
+    await expect(importFile(...pick('actually-gpx.kml', gpx))).resolves.toMatchObject({ count: 1 });
+    expect(createFeatureMock.mock.calls[0][1].geometry).toEqual({ type: 'Point', coordinates: [2, 1] });
+  });
+
+  it('sniffs past a UTF-8 BOM, an XML prolog and leading whitespace', async () => {
+    const withProlog = `\uFEFF  \n<?xml version="1.0" encoding="UTF-8"?>\n<!-- made by x -->\n${gpx}`;
+    await expect(importFile(...pick('bom.dat', withProlog))).resolves.toMatchObject({ count: 1 });
+  });
+
+  it('falls back to the extension when the content gives no clue, then reports nothing found', async () => {
+    await expect(importFile(...pick('empty.gpx', ''))).rejects.toThrow(
       'No points, lines, or areas found in this file.'
     );
+  });
+});
+
+describe('importFile: KMZ', () => {
+  const kml = (name: string) =>
+    `<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark><name>${name}</name><Point><coordinates>2,1,0</coordinates></Point></Placemark></Document></kml>`;
+
+  it('imports the doc.kml inside a .kmz and ignores the images beside it', async () => {
+    const result = await importFile(
+      ...(await pickKmz('trip.kmz', { 'doc.kml': kml('Camp'), 'files/icon.png': 'not really a png' }))
+    );
+    expect(result).toEqual({ count: 1, folderName: 'Imported: trip' });
+    expect(createFeatureMock.mock.calls[0][1].name).toBe('Camp');
+  });
+
+  it('prefers doc.kml, then the shallowest .kml, when a KMZ holds several', async () => {
+    await importFile(...(await pickKmz('a.kmz', { 'deep/extra/other.kml': kml('deep'), 'doc.kml': kml('main') })));
+    expect(createFeatureMock.mock.calls[0][1].name).toBe('main');
+
+    createFeatureMock.mockClear();
+    await importFile(...(await pickKmz('b.kmz', { 'deep/extra/other.kml': kml('deep'), 'layer.kml': kml('shallow') })));
+    expect(createFeatureMock.mock.calls[0][1].name).toBe('shallow');
+  });
+
+  it('recognises a zip by its signature when the name gives no hint', async () => {
+    await expect(importFile(...(await pickKmz('document%3A99', { 'doc.kml': kml('shared') })))).resolves.toMatchObject({
+      count: 1,
+    });
+  });
+
+  it('is case-insensitive about the .KMZ extension and the KML inside', async () => {
+    await expect(importFile(...(await pickKmz('TRIP.KMZ', { 'DOC.KML': kml('Loud') })))).resolves.toMatchObject({
+      count: 1,
+    });
+  });
+
+  it('explains a KMZ with no KML inside', async () => {
+    await expect(importFile(...(await pickKmz('empty.kmz', { 'readme.txt': 'hi' })))).rejects.toThrow(
+      'This KMZ file has no KML inside it.'
+    );
+    expect(createFolderMock).not.toHaveBeenCalled();
+  });
+
+  it('still reads a .kmz that is really plain KML text', async () => {
+    await expect(importFile(...pick('mislabelled.kmz', kml('plain')))).resolves.toMatchObject({ count: 1 });
+  });
+
+  it('rejects a .kmz with garbage content (the extension still marks it as KML, which finds nothing)', async () => {
+    await expect(importFile(...pick('bad.kmz', 'not a zip and not xml'))).rejects.toThrow(
+      'No points, lines, or areas found in this file.'
+    );
+  });
+
+  it('keeps KMZ folder structure and colors like a plain KML', async () => {
+    const doc = `<kml><Document><Style id="s"><IconStyle><color>ff5ec522</color></IconStyle></Style>
+      <Folder><name>Layer</name><Placemark><name>p</name><styleUrl>#s</styleUrl><Point><coordinates>2,1,0</coordinates></Point></Placemark></Folder></Document></kml>`;
+    await importFile(...(await pickKmz('styled.kmz', { 'doc.kml': doc })));
+    expect(createFolderMock.mock.calls.map((c) => c[1].name)).toEqual(['Imported: styled', 'Layer']);
+    expect(createFeatureMock.mock.calls[0][1].color).toBe('#22c55e');
   });
 });
 
@@ -197,6 +301,7 @@ describe('importFile: result and folder mapping', () => {
       folderId: 42,
       name: 'W',
       notes: 'note',
+      color: null,
       geometry: { type: 'Point', coordinates: [2, 1] },
       source: 'imported',
     });
@@ -296,6 +401,16 @@ describe('importFile: result and folder mapping', () => {
     ).rejects.toThrow('disk full');
   });
 
+  it('does the whole import inside one transaction', async () => {
+    await importFile(...pick('tx.gpx', '<gpx><wpt lat="1" lon="2"/><wpt lat="3" lon="4"/></gpx>'));
+    expect(withTransactionAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not open a transaction for a file it cannot parse', async () => {
+    await expect(importFile(...pick('none.gpx', '<gpx></gpx>'))).rejects.toThrow();
+    expect(withTransactionAsync).not.toHaveBeenCalled();
+  });
+
   it('counts every inserted feature', async () => {
     const wpts = Array.from({ length: 25 }, (_, i) => `<wpt lat="${i}" lon="${i}"/>`).join('');
     const result = await importFile(...pick('many.gpx', `<gpx>${wpts}</gpx>`));
@@ -373,34 +488,79 @@ describe('importFile: GeoJSON parsing', () => {
     expect(createFeatureMock.mock.calls[0][1].name).toBe('kept');
   });
 
-  it('currently drops Multi* geometries entirely (documented limitation)', async () => {
-    // GeoJSON import only accepts Point/LineString/Polygon; MultiPoint,
-    // MultiLineString and MultiPolygon features are ignored, so a file made
-    // only of them fails with "No points, lines, or areas found". If Multi*
-    // support is added (e.g. exploding into single-part features), update this.
-    await expect(
-      importFile(
-        ...pick(
-          'multi.geojson',
-          featureCollection([
-            geoFeature({ type: 'MultiPoint', coordinates: [[0, 0], [1, 1]] }),
-            geoFeature({ type: 'MultiLineString', coordinates: [[[0, 0], [1, 1]]] }),
-            geoFeature({ type: 'MultiPolygon', coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 0]]]] }),
-          ])
-        )
+  it('explodes Multi* geometries and GeometryCollections into single-part features sharing the properties', async () => {
+    const result = await importFile(
+      ...pick(
+        'multi.geojson',
+        featureCollection([
+          geoFeature({ type: 'MultiPoint', coordinates: [[0, 0], [1, 1]] }, { name: 'mp' }),
+          geoFeature({ type: 'MultiLineString', coordinates: [[[0, 0], [1, 1]], [[2, 2], [3, 3]]] }, { name: 'ml' }),
+          geoFeature(
+            { type: 'MultiPolygon', coordinates: [[[[0, 0], [1, 0], [1, 1], [0, 0]]], [[[5, 5], [6, 5], [6, 6], [5, 5]]]] },
+            { name: 'mpoly' }
+          ),
+          geoFeature(
+            { type: 'GeometryCollection', geometries: [POINT, { type: 'MultiPoint', coordinates: [[7, 7]] }] },
+            { name: 'gc' }
+          ),
+        ])
       )
-    ).rejects.toThrow('No points, lines, or areas found in this file.');
-  });
-
-  it('does not import colours from GeoJSON properties (export writes them, import ignores them)', async () => {
-    await importFile(
-      ...pick('color.geojson', featureCollection([geoFeature(POINT, { name: 'red', color: '#e11d48' })]))
     );
-    expect(createFeatureMock.mock.calls[0][1]).not.toHaveProperty('color');
+    expect(result.count).toBe(2 + 2 + 2 + 2);
+    const inputs = createFeatureMock.mock.calls.map((c) => c[1]);
+    expect(inputs.map((i) => [i.name, i.geometry.type])).toEqual([
+      ['mp', 'Point'], ['mp', 'Point'],
+      ['ml', 'LineString'], ['ml', 'LineString'],
+      ['mpoly', 'Polygon'], ['mpoly', 'Polygon'],
+      ['gc', 'Point'], ['gc', 'Point'],
+    ]);
+    expect(inputs[4].geometry.coordinates).toEqual([[[0, 0], [1, 0], [1, 1], [0, 0]]]);
   });
 
-  it('rejects invalid JSON with a SyntaxError', async () => {
-    await expect(importFile(...pick('bad.geojson', '{"type": "FeatureCollection", '))).rejects.toThrow(SyntaxError);
+  it('accepts a bare geometry (no Feature wrapper)', async () => {
+    const result = await importFile(...pick('bare.geojson', JSON.stringify(POINT)));
+    expect(result.count).toBe(1);
+    expect(createFeatureMock.mock.calls[0][1].geometry).toEqual(POINT);
+  });
+
+  it('reads colors from color, stroke, marker-color or fill, snapped to the palette', async () => {
+    await importFile(
+      ...pick(
+        'color.geojson',
+        featureCollection([
+          geoFeature(POINT, { name: 'own', color: '#e11d48' }),
+          geoFeature(POINT, { name: 'caltopo line', stroke: '#0000ff' }),
+          geoFeature(POINT, { name: 'simplestyle pin', 'marker-color': '#00ff00' }),
+          geoFeature(POINT, { name: 'fill only', fill: '#f80' }),
+          geoFeature(POINT, { name: 'off-palette', color: '#ff0000' }),
+          geoFeature(POINT, { name: 'not hex', color: 'red' }),
+          geoFeature(POINT, { name: 'none' }),
+        ])
+      )
+    );
+    const colors = createFeatureMock.mock.calls.map((c) => [c[1].name, c[1].color]);
+    expect(colors).toEqual([
+      ['own', '#e11d48'],
+      ['caltopo line', '#6366f1'],
+      ['simplestyle pin', '#22c55e'],
+      ['fill only', '#f97316'],
+      ['off-palette', '#e11d48'],
+      ['not hex', null],
+      ['none', null],
+    ]);
+  });
+
+  it("falls back to CalTopo's `title` for the name and numbers for text", async () => {
+    await importFile(
+      ...pick('title.geojson', featureCollection([geoFeature(POINT, { title: 'Ridge camp', name: '', comment: 7 })]))
+    );
+    expect(createFeatureMock.mock.calls[0][1]).toMatchObject({ name: 'Ridge camp', notes: '7' });
+  });
+
+  it('rejects invalid JSON with a plain-language error', async () => {
+    await expect(importFile(...pick('bad.geojson', '{"type": "FeatureCollection", '))).rejects.toThrow(
+      'This file is not valid GeoJSON.'
+    );
     expect(createFolderMock).not.toHaveBeenCalled();
   });
 
@@ -418,6 +578,70 @@ describe('importFile: GeoJSON parsing', () => {
     await expect(importFile(...pick('empty-fc.json', featureCollection([])))).rejects.toThrow(
       'No points, lines, or areas found in this file.'
     );
+  });
+});
+
+describe('closed GPX tracks as areas', () => {
+  const closedTrack = `<trk><name>Unit 12</name><trkseg>
+    <trkpt lat="0" lon="0"/><trkpt lat="0" lon="1"/><trkpt lat="1" lon="1"/><trkpt lat="0" lon="0"/></trkseg></trk>`;
+  const openTrack = `<trk><name>Trail</name><trkseg>
+    <trkpt lat="0" lon="0"/><trkpt lat="0" lon="1"/><trkpt lat="1" lon="1"/><trkpt lat="1" lon="2"/></trkseg></trk>`;
+  const gpx = (...bodies: string[]) => `<gpx>${bodies.join('')}</gpx>`;
+  const importedGeometries = () => createFeatureMock.mock.calls.map((c) => c[1].geometry);
+
+  it('counts only GPX lines whose last point returns to the first', async () => {
+    expect(countClosedLines(await parseImportFile(...pick('a.gpx', gpx(closedTrack, openTrack, closedTrack)).slice(1) as [string, string]))).toBe(2);
+  });
+
+  it('counts a route as well as a track, but not a pin', async () => {
+    const route = `<rte><rtept lat="0" lon="0"/><rtept lat="0" lon="1"/><rtept lat="1" lon="1"/><rtept lat="0" lon="0"/></rte>`;
+    const pin = `<wpt lat="0" lon="0"/>`;
+    expect(countClosedLines(await parseImportFile(...pick('a.gpx', gpx(route, pin)).slice(1) as [string, string]))).toBe(1);
+  });
+
+  it('needs at least four points (a there-and-back two-point line is not an area)', async () => {
+    const thereAndBack = `<trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="0" lon="1"/><trkpt lat="0" lon="0"/></trkseg></trk>`;
+    expect(countClosedLines(await parseImportFile(...pick('a.gpx', gpx(thereAndBack)).slice(1) as [string, string]))).toBe(0);
+  });
+
+  it('does not count a loop whose ends are a GPS-noise apart', async () => {
+    const nearlyClosed = `<trk><trkseg><trkpt lat="0" lon="0"/><trkpt lat="0" lon="1"/><trkpt lat="1" lon="1"/><trkpt lat="0.00001" lon="0"/></trkseg></trk>`;
+    expect(countClosedLines(await parseImportFile(...pick('a.gpx', gpx(nearlyClosed)).slice(1) as [string, string]))).toBe(0);
+  });
+
+  it('never counts KML or GeoJSON lines: those formats have real polygons', async () => {
+    const kmlLoop = `<kml><Document><Placemark><LineString><coordinates>0,0 1,0 1,1 0,0</coordinates></LineString></Placemark></Document></kml>`;
+    expect(countClosedLines(await parseImportFile(...pick('a.kml', kmlLoop).slice(1) as [string, string]))).toBe(0);
+  });
+
+  it('imports closed tracks as lines by default', async () => {
+    await importFile(...pick('a.gpx', gpx(closedTrack)));
+    expect(importedGeometries()[0].type).toBe('LineString');
+  });
+
+  it('turns closed tracks into polygons (same ring) when asked, leaving open tracks and pins alone', async () => {
+    await importFile(...pick('a.gpx', gpx(closedTrack, openTrack, '<wpt lat="5" lon="5"/>')), {
+      closedLinesAsAreas: true,
+    });
+    // GPX parsing yields waypoints first, then tracks.
+    expect(importedGeometries()).toEqual([
+      { type: 'Point', coordinates: [5, 5] },
+      { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+      expect.objectContaining({ type: 'LineString' }),
+    ]);
+  });
+
+  it('does not touch a closed line in a KML file even when asked', async () => {
+    const kmlLoop = `<kml><Document><Placemark><LineString><coordinates>0,0 1,0 1,1 0,0</coordinates></LineString></Placemark></Document></kml>`;
+    await importFile(...pick('a.kml', kmlLoop), { closedLinesAsAreas: true });
+    expect(importedGeometries()[0].type).toBe('LineString');
+  });
+
+  it('insertParsedImport works from an already-parsed file (the flow that asks before importing)', async () => {
+    const parsed = await parseImportFile(...pick('later.gpx', gpx(closedTrack)).slice(1) as [string, string]);
+    const result = await insertParsedImport(db, parsed, 'later.gpx', { closedLinesAsAreas: true });
+    expect(result).toEqual({ count: 1, folderName: 'Imported: later' });
+    expect(importedGeometries()[0].type).toBe('Polygon');
   });
 });
 
@@ -440,5 +664,51 @@ describe('importFile: known issues', () => {
     );
     const [p1, p2] = createFeatureMock.mock.calls.map((c) => c[1].folderId);
     expect(p1).not.toBe(p2);
+  });
+});
+
+describe('track samples through import and export', () => {
+  const timedTrack = `<gpx><trk><name>Hike</name><trkseg>
+    <trkpt lat="1" lon="2"><ele>100</ele><time>2026-09-24T17:00:00Z</time></trkpt>
+    <trkpt lat="3" lon="4"><ele>110</ele><time>2026-09-24T17:01:00Z</time></trkpt></trkseg></trk></gpx>`;
+
+  it('saves a GPX track\'s time and elevation under the new feature id', async () => {
+    createFeatureMock.mockResolvedValueOnce(77);
+    await importFile(...pick('hike.gpx', timedTrack));
+    expect(saveTrackDataMock).toHaveBeenCalledTimes(1);
+    expect(saveTrackDataMock).toHaveBeenCalledWith(db, 77, {
+      times: [Date.UTC(2026, 8, 24, 17, 0, 0), Date.UTC(2026, 8, 24, 17, 1, 0)],
+      elevations: [100, 110],
+    });
+  });
+
+  it('saves nothing for pins, plain lines or files without samples', async () => {
+    await importFile(...pick('plain.gpx', '<gpx><wpt lat="1" lon="2"/><trk><trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk></gpx>'));
+    expect(saveTrackDataMock).not.toHaveBeenCalled();
+  });
+
+  it('does not save samples for a closed track imported as an area', async () => {
+    const closed = `<gpx><trk><trkseg>
+      <trkpt lat="0" lon="0"><ele>1</ele></trkpt><trkpt lat="0" lon="1"><ele>2</ele></trkpt>
+      <trkpt lat="1" lon="1"><ele>3</ele></trkpt><trkpt lat="0" lon="0"><ele>1</ele></trkpt></trkseg></trk></gpx>`;
+    await importFile(...pick('area.gpx', closed), { closedLinesAsAreas: true });
+    expect(createFeatureMock.mock.calls[0][1].geometry.type).toBe('Polygon');
+    expect(saveTrackDataMock).not.toHaveBeenCalled();
+    await importFile(...pick('area.gpx', closed));
+    expect(saveTrackDataMock).toHaveBeenCalledTimes(1); // as a line it keeps them
+  });
+
+  it('a GPX export with a db looks up samples for the line features only', async () => {
+    getTrackDataMock.mockResolvedValue(new Map([[5, { times: [0, 1000, 2000], elevations: [1, 2, 3] }]]));
+    await exportFeatures([makeFeature(LINE, { id: 5, type: 'line' }), makeFeature(POINT, { id: 6 })], 'gpx', 'mixed', db);
+    expect(getTrackDataMock).toHaveBeenCalledWith(db, [5]);
+    expect(mockState.written[0].content).toContain('<ele>1</ele><time>1970-01-01T00:00:00.000Z</time>');
+  });
+
+  it('does not look up samples for KML or GeoJSON, or when no db is given', async () => {
+    await exportFeatures([makeFeature(LINE, { id: 5, type: 'line' })], 'kml', 'a', db);
+    await exportFeatures([makeFeature(LINE, { id: 5, type: 'line' })], 'geojson', 'b', db);
+    await exportFeatures([makeFeature(LINE, { id: 5, type: 'line' })], 'gpx', 'c');
+    expect(getTrackDataMock).not.toHaveBeenCalled();
   });
 });

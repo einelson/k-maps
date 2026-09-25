@@ -45,6 +45,17 @@ token they rely on; what's untested is how they look and behave on the phone.
   signal and pauses for two minutes; a failed cell isn't retried for five. A small "Loading map
   data…" chip shows progress. Switch it off with Layers → *Load land data as I pan*. OSM and POI
   stay manual — the free Overpass servers are too slow to fetch behind your back
+- **Region packs (Downloads → Region packs).** A whole region's land, forest roads and USFS trails in
+  one download per layer, from prebuilt zips on the repo's rolling `data` GitHub release, instead of
+  fetching hundreds of cells from the public services. Idaho is 329 cells: 40 MB to download
+  (land 15 + MVUM 19 + trails 7), about 165 MB once unzipped on the device. The zip holds the exact
+  per-cell files the on-device downloader writes, so installing is unzipping into the same layout;
+  it never overwrites bundled starter cells or cells the device fetched after the pack was built,
+  and shows "Update" when a newer pack is published. Built by `tools/build_region_pack.mjs`
+- **Only cells near the view are drawn.** Every downloaded cell is a MapLibre source plus several style
+  layers, so a state's worth can't all be mounted at once. The map mounts the cells in view plus one
+  cell around them (at most 30 per layer) from zoom 9 in (`src/map/cellWindow.ts`); the bundled
+  starter data is one source and always draws
 - **Layers are sorted into groups** — *Land & access*, *Roads & trails*, *Water & terrain*,
   *Hazards & conditions* — in both the map's quick dropdown (groups fold away; one opens with any
   layer that's on and shows an "N on" badge) and the full Layers screen (legends, opacity,
@@ -70,11 +81,27 @@ token they rely on; what's untested is how they look and behave on the phone.
 - **USFS trails** (National Forest System trails from the same Enterprise Data Warehouse as MVUM):
   hiking/horse/bike trails teal, motorized magenta, dashed; tap for allowed uses, surface and tread
   width. A per-cell pack like MVUM, so it works offline once loaded
-- **Idaho hunting units** (IDFG Game Management Units) bundled statewide (100 polygons, 1.3 MB;
-  `tools/fetch_idfg_units.mjs`): dashed boundaries with unit numbers, tap for the unit, elk zone and
-  IDFG deer/elk pages. Outline-only on purpose — MapLibre gives a tap to the topmost source, so a
-  fill would block taps on the land polygons beneath. IDFG calls the data a "best representation
-  only": the layer and its card say to confirm boundaries in the regulation booklet
+- **Hunting units for 30 states** (each state wildlife agency's own hunt units, management zones or hunt
+  districts — GMUs, WMUs, deer permit areas ...), normalized to one shape so any state draws and
+  describes the same way: dashed boundaries with unit numbers, tap for the unit, its regulation links and
+  the agency's hunting-regulations page. **Idaho is bundled** (100 units, 1.4 MB); the other 29 are
+  **downloaded per state** from Downloads → Hunting units (9.7 MB for all 29, 0.02–1.8 MB each), stored on
+  the device and drawn from there, so they work with **no connection**. States that publish separate
+  species layers (Wyoming, Montana, Michigan, ...) get a picker for which one to show. Outline-only on
+  purpose — MapLibre gives a tap to the topmost source, so a fill would block taps on the land polygons
+  beneath. **Only official agency data is included** (each source is checked to belong to the state's own
+  wildlife agency or state GIS office; a state with no official layer is left out rather than filled from a
+  third-party copy). **Hunters are told to check their local laws and regulations**: a required
+  "I understand" the first time the layer is turned on or a state is downloaded, a notice on the Downloads
+  section, the Layers note, and on every unit card — which also states when the source data was last edited
+  (or that the agency's service doesn't publish a date), so nobody mistakes an old layer for a current one.
+  **A layer whose source data was last edited 3+ years ago must be accepted separately**: a notice naming
+  each old layer and its age before it downloads, again on the map if already installed data has since aged
+  past the line (or is bundled Idaho), a red warning in the Downloads list, and a warning row on that
+  layer's unit cards. Acceptance is remembered per state for exactly the layers and dates shown, so newly
+  old or changed data asks again, and removing a state resets it (`src/map/huntUnitStaleness.ts`)
+  Only states in view are mounted (`src/map/huntUnitWindow.ts`), so downloading every state doesn't slow the map. Built by
+  `tools/build_hunt_units.mjs`; see the coverage table below
 - **"Likely private" shading (§6.4):** each land cell also carries the inferred complement — cell
   rectangle minus the union of public polygons, slivers dropped — drawn as a purple tint with a
   tap card explaining it's an inference, not a parcel record
@@ -130,14 +157,57 @@ token they rely on; what's untested is how they look and behave on the phone.
 - Drawing points/lines/areas end-to-end: tap-to-place points, multi-vertex lines/areas with live
   length/area readout, undo/cancel/done, saved to SQLite on completion; a separate measure tool
   that never saves (§7.3)
-- GPS dot toggle and foreground-only GPS track recording, saved as a line feature with
-  `source='track'` on stop (§7.5) — background recording is explicitly out of scope, same call
-  the spec makes
-- Folders, tags (create/assign/remove/filter), multi-select in Items (move/recolor/tag/delete/
-  export), saved views capturing base map + overlays + POI toggles + filter (§5.3)
+- GPS dot toggle and **background GPS track recording** (§7.5) that keeps going with the screen locked
+  or the app closed. Record track (in the "+" menu) starts an Android foreground-service location task
+  (`expo-location` + `expo-task-manager`, `src/features/trackTask.ts`), which shows a "Recording a track"
+  notification while it runs and appends every fix to SQLite (`recording_session` / `recording_fixes`) as
+  it arrives, so the recording survives the app being killed. Because the service is started while the app
+  is on screen it needs only the ordinary location permission, not "Allow all the time". When you reopen the
+  app it rebuilds the live recording from the database (`RecordingSync`) and restarts the service if the
+  system killed it. Fixes worse than 50 m accuracy are dropped (a cold GPS start otherwise draws a spike)
+- **Recording button + panel.** While recording, a "● 12:34 · 1.23 mi" button sits on the map under the
+  locate button. Tapping it (or "Track stats" in the "+" menu) opens a panel with the live clock and
+  distance, the same stats and charts a saved track shows, and **Delete** (asks first) and **End & save**.
+  Ending saves the track from the database, clears the recording only once it's safely saved, and opens
+  the track's dashboard so the name, folder, color and tags are one tap away. A track is stored as a line
+  with `source='track'` plus each point's time and altitude in `track_data`
+- **Track dashboard** (`FeatureDetailScreen`, shown for recorded tracks and for GPX tracks that carry
+  timestamps/elevation): distance, time, moving time (stretches under 0.5 m/s don't count), average
+  speed, climb, descent, high and low point; an elevation chart (switch its x axis between time and
+  distance) and a distance-over-time chart, both scrubbable by dragging a finger across them; and
+  "Export GPX" with `<time>`/`<ele>` on every point. Numbers follow the Units setting. Elevation is
+  smoothed (5-point average) and climb ignores changes under 3 m, so GPS noise doesn't inflate it. Charts
+  are drawn with `react-native-svg` (`LineChart.tsx`, pure math in `src/features/chartMath.ts`); stats
+  are computed in `src/features/trackStats.ts`. Editing a track's vertices that changes their count drops
+  its samples, since they'd no longer line up
+- **My Content is a folder browser.** Folders nest to any depth: browse in and out with a breadcrumb,
+  add a folder inside the one you're in (+ Folder), and rename, move or delete one from its ⋯ menu.
+  Deleting a folder never deletes pins: its pins and subfolders move up a level. Searching or filtering
+  switches to one flat list across every folder (each item shows its folder path). A filter, export
+  or hidden-folder setting on a folder applies to everything nested inside it
+- **Tags button** (My Content header) opens a tag manager: add a tag without selecting anything, rename
+  it (every item keeps it; names are unique ignoring case), or delete it (removed from every item after
+  a confirmation that says how many; items are never deleted). Deleted tags and folders are also
+  dropped from the active filter, saved filter presets and saved views
+- Tags (assign/remove/filter), multi-select in Items (move/recolor/tag/delete/export), saved views
+  capturing base map + overlays + POI toggles + filter (§5.3)
 - Real GPX/KML/GeoJSON export and import (hand-rolled XML, `fast-xml-parser` for reading), a
   dedicated "export pins (points only)" action, export by folder or current filter, and a full
   DB+photos zip backup via the OS share sheet (§7.4)
+- Import reads more than it writes, aimed at exports from onX, Gaia, CalTopo, Google My Maps/Earth, Organic
+  Maps and Garmin (built from those apps' documented conventions and synthetic samples, not yet checked
+  against real exports): KMZ (unzipped with `jszip`), format sniffed from the content rather than the file
+  name, `MultiGeometry`/`MultiPoint`/`MultiLineString`/`MultiPolygon`/`GeometryCollection` split into
+  single-part items, HTML descriptions turned into plain notes, GPX `<cmt>` kept as notes, and colors
+  (KML styles and StyleMaps, GPX Garmin/OsmAnd extension colors, GeoJSON `color`/`stroke`/`marker-color`/
+  `fill`) snapped to the nearest palette color by hue. Icons and line widths are not imported. Closed GPX
+  tracks (how onX exports area shapes) get a "lines or areas?" prompt. An import is one transaction, so a
+  failure leaves nothing behind
+- "Open with K-Maps": Android intent filters (`app.json`) let a GPX/KML/KMZ/GeoJSON file opened from the
+  Files app or a browser download land in K-Maps, which asks before importing
+  (`src/navigation/IncomingImportHandler.tsx`). Only Android's *open* (`ACTION_VIEW`) is handled, not the
+  share-sheet *send* (`ACTION_SEND`), which React Native doesn't surface — that would need
+  `expo-share-intent` or a native module
 - Cell math (`childTiles`, `tmsY`, cell↔lon/lat), an MBTiles writer, and a concurrency-limited
   downloader with resume (§4) — writes real files, but see the device-testing caveat above. The
   Downloads map now draws the cell grid state (selected / downloaded / partial), and max zoom is
@@ -154,13 +224,36 @@ token they rely on; what's untested is how they look and behave on the phone.
 - Radar, NHD, NWI, slope angle and land managers are online-only rasters: nothing to download, no
   offline copy, no tap-to-identify. The spec's true-vector NHD/NWI (`ogr2ogr` → `tippecanoe`) and a
   build-time slope raster (`gdaldem slope`) would fix that but need a hosted tile pack
-- Hunting units cover Idaho only; other states' units would each be another bundled asset
+- Hunting units cover 30 states (table below). The other 20 have no official unit layer I could find
+  (regulated by county or statewide, or the agency doesn't publish it as open data). Each state's
+  boundaries are as current as its agency's service on the day the pack was built — several publish
+  yearly, so re-run `tools/build_hunt_units.mjs --refresh --publish` each season. Arizona is left out
+  on purpose: only third-party copies exist, and the rule is official boundaries only
+- Downloaded overlay cells (region packs included) aren't drawn below zoom 9, to keep the number of map
+  sources bounded; the bundled starter region still is. A statewide overview at low zoom would need
+  simplified or tiled data
+- Region packs exist for Idaho only (add a region in `tools/regionCells.mjs`), and the release is
+  public GitHub, so a rebuild has to be re-published by hand with `--publish`
 - As-you-pan loading covers land, MVUM and USFS trails only, and only in the main map (not the
   Downloads screen's), from zoom 10
 - Photos store an absolute file URI; if the app's documents path ever changes they'd show "Missing"
 - Point clustering only applies to your saved points, not the POI pins
-- Background location, KMZ import, MultiPolygon GeoJSON import, and everything in the spec's
-  "Later" roadmap row
+- Import limits: polygon holes and KML `gx:Track` are dropped, waypoint/route `<ele>`/`<time>` and icons
+  aren't kept (track points' are), GPX/KML export doesn't write colors (GeoJSON export does), and
+  importing the same file twice duplicates it
+- Track elevation is the phone's raw GPS altitude. expo-location documents it as height above the WGS 84
+  ellipsoid, which differs from sea level by roughly 10–35 m across the US, so climb and descent are
+  right but the high/low point can read off by that much (some Android phones already report sea level;
+  not verified on the Galaxy S21). A geoid correction would fix it once the phone's behaviour is known
+- Background recording is written but not yet proven on the Galaxy S21: whether it survives the app being
+  swiped away varies by phone maker (expo-location documents "background location will stop if the user
+  terminates the app"; a foreground service normally prevents that, but Samsung's battery manager can still
+  kill it — set K-Maps to "Unrestricted" battery use). Nothing already recorded is lost either way: it's in
+  SQLite and reopening the app picks it up, but there would be a gap
+- Android only: iOS would need `isIosBackgroundLocationEnabled` and an "Always" permission flow, untested
+- The foreground-service notification uses the launcher icon as its small icon, which some Android versions
+  draw as a white square; a dedicated monochrome notification icon would fix it
+- Everything in the spec's "Later" roadmap row
 - Per-cell delete for raster tiles (overlay data can be deleted per layer)
 
 ## Setup
@@ -202,10 +295,70 @@ app runs on-device (`src/packs/`). To refresh it, or debug a pack for any bbox:
 ```bash
 node tools/build_starter_pack.mjs            # land, mvum, poi (all) or one: ... land
 node tools/fetch_blm_sma.mjs                 # BLM private/unknown cross-check
-node tools/fetch_idfg_units.mjs              # Idaho hunt units (statewide; re-run each season)
+node tools/fetch_idfg_units.mjs              # bundled Idaho hunt units (re-run each season)
+node tools/build_hunt_units.mjs --check      # dry run of every other state: counts, samples, link check
 node tools/fetch_pack.mjs osm -116.3 43.6 -116.1 43.7 out.json   # any cell pack (land|mvum|trails|poi|osm), any bbox
 node tools/build_glyphs.mjs                  # regenerate the bundled label glyphs
 ```
+
+## Building and publishing region packs
+
+Region packs are built on a laptop with the same fetchers the app runs (`src/packs/`), one z10 cell at a
+time, then zipped per layer into `packs/build/` (git-ignored):
+
+```bash
+node tools/build_region_pack.mjs idaho               # land, mvum, trails; ~5 min for Idaho, cells are cached
+node tools/build_region_pack.mjs idaho mvum          # just one layer
+node tools/build_region_pack.mjs idaho --limit 4     # trial run on a few cells (never published)
+node tools/build_region_pack.mjs idaho --publish     # also upload the zips + manifest to the `data` release (needs gh)
+```
+
+A failed cell aborts that layer's zip but keeps the rest cached, so re-running only retries what failed.
+Delete `packs/build/cache/` to refetch fresh data. The app finds packs through the manifest at
+`https://github.com/einelson/k-maps/releases/download/data/manifest.json`
+(`src/packs/regionPacks.ts`).
+
+## Hunting-unit coverage by state
+
+| Status | States |
+|---|---|
+| **Bundled** | ID |
+| **Downloadable** (Downloads → Hunting units) | AK AR CA CO CT FL HI KS KY MA ME MI MN MT ND NE NH NJ NM NV NY OR PA SC UT VT WA WI WY |
+| **Left out on purpose** | AZ — only third-party copies of the AZGFD boundaries exist (a 2020 upload and a county mirror); no official layer found |
+| **Not available to us** | SD — the agency's layers exist but require sign-in |
+| **No official unit layer found** | AL DE GA IL IN IA LA MD MS MO NC OH OK RI TN TX VA WV |
+
+What's in each downloadable state (sets are selectable per state): AK Game Management Units · AR Deer
+Management Units · CA Deer Hunt Zones (approximate legal boundary) · CO Game Management Units · CT
+Deer & Turkey Zones · FL Deer Management Units · HI Public Hunting Units · KS Deer Management Units · KY
+Deer Zones + Elk Units · MA Wildlife Management Zones · ME Wildlife Management Districts · MI Deer, Bear,
+Elk and Turkey Management Units · MN Deer Permit Areas + Elk Zones · MT Deer/Elk, Antelope, Black Bear,
+Moose, Sheep and Goat districts · ND Deer, Elk and Moose Units · NE Deer + Antelope Units · NH Wildlife
+Management Units · NJ Deer Management Zones · NM Game Management Units · NV Hunt Units · NY Wildlife
+Management Units · OR Wildlife Management Units · PA Wildlife Management Units + Elk Zones · SC Game Zones
+· UT Big Game Hunt Boundaries · VT Wildlife Management Units · WA Game Management Units · WI Deer
+Management Units · WY Elk, Deer, Antelope, Moose and Black Bear Hunt Areas.
+
+The "no official unit layer" states mostly regulate by county or statewide rather than by unit (Ohio's
+own service confirms it: its deer, turkey and quail rules are per county), and I didn't find a unit or
+zone layer published by the agency for the others. Turkey, waterfowl, upland and furbearer zones are not
+included except where a state's main unit layer is shared with them (Michigan turkey units, Connecticut).
+A state can be added by writing one entry in `src/huntUnits/registry.ts` (the layer URL plus how its
+columns map to a unit and title); each entry's real example row is checked by a test.
+
+## Building and publishing hunting units
+
+```bash
+node tools/build_hunt_units.mjs --check              # fetch every state, print counts/samples, check links; writes nothing
+node tools/build_hunt_units.mjs OR WA                # build just these states into packs/build/
+node tools/build_hunt_units.mjs --publish            # build all and upload zips + manifest to the `data` release
+node tools/build_hunt_units.mjs --refresh MT --publish   # ignore the fetch cache for Montana (new season)
+```
+
+Fetched states are cached in `packs/build/cache/hunt/`; a failed state keeps its previous pack and
+`--publish` refuses to upload from a run with failures. The manifest is shared with the region packs
+(`tools/packManifest.mjs`): building one kind never drops the other's entries, even on a fresh checkout
+(it starts from the published manifest).
 
 ## Data & attribution
 
@@ -221,8 +374,8 @@ node tools/build_glyphs.mjs                  # regenerate the bundled label glyp
 - Water and slope: **USGS National Hydrography Dataset** and **USGS 3DEP** elevation (public
   domain); wetlands: **USFWS National Wetlands Inventory** (public domain)
 - Land managers: **BLM National Surface Management Agency** (public domain)
-- Idaho hunting units: **Idaho Department of Fish and Game** open GIS data — best representation
-  only, no warranty
+- Hunting units: each state's **wildlife agency** open GIS data (named on every unit's card and in the
+  manifest) — best representation only, no warranty; display only, simplified to about 30 m (Oregon is not simplified: ODFW's terms forbid altering its boundaries)
 - POI pins, roads/trails/labels: **© OpenStreetMap contributors** (ODbL)
 - Full licensing checklist: [docs/SPEC.md §11](docs/SPEC.md#11-licensing-and-attribution-checklist)
 

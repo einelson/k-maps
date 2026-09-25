@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
+import { flattenFolders } from '../../data/folderTree';
 import { listFolders } from '../../data/foldersRepo';
 import { listTags } from '../../data/tagsRepo';
 import type { FeatureType, Folder, Tag } from '../../data/types';
@@ -168,24 +169,27 @@ export function FilterChipBar() {
 
           {open === 'folders' &&
             (folders.length === 0 ? (
-              <Text style={styles.empty}>No folders yet. Create one from Items → Select → Move.</Text>
+              <Text style={styles.empty}>No folders yet. Create one from My Content.</Text>
             ) : (
-              folders.map((folder) => {
-                const on = filters.folderIds?.includes(folder.id) ?? false;
-                return (
-                  <Pressable
-                    key={folder.id}
-                    style={styles.row}
-                    onPress={() =>
-                      setFilters({ ...filters, folderIds: toggled(filters.folderIds, folder.id) })
-                    }
-                  >
-                    <View style={[styles.checkbox, on && styles.checkboxOn]} />
-                    <View style={[styles.dot, { backgroundColor: folder.color ?? '#999' }]} />
-                    <Text style={styles.rowText}>{folder.name}</Text>
-                  </Pressable>
-                );
-              })
+              <>
+                <Text style={styles.empty}>Choosing a folder also shows what&apos;s in the folders inside it.</Text>
+                {flattenFolders(folders).map(({ folder, depth }) => {
+                  const on = filters.folderIds?.includes(folder.id) ?? false;
+                  return (
+                    <Pressable
+                      key={folder.id}
+                      style={[styles.row, { paddingLeft: depth * 20 }]}
+                      onPress={() =>
+                        setFilters({ ...filters, folderIds: toggled(filters.folderIds, folder.id) })
+                      }
+                    >
+                      <View style={[styles.checkbox, on && styles.checkboxOn]} />
+                      <View style={[styles.dot, { backgroundColor: folder.color ?? '#999' }]} />
+                      <Text style={styles.rowText}>{folder.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </>
             ))}
 
           {open === 'colors' && (

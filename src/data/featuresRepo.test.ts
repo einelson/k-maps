@@ -16,6 +16,7 @@ class RecordingDb {
   tags = new Map<string, number>();
   featureRows: unknown[] = [];
   featureTagRows: { feature_id: number; tag_id: number }[] = [];
+  folderRows: unknown[] = [];
 
   async runAsync(sql: string, ...params: unknown[]) {
     this.writes.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
@@ -35,6 +36,7 @@ class RecordingDb {
   async getAllAsync<T>(sql: string): Promise<T[]> {
     if (sql.includes('FROM features f')) return this.featureRows as T[];
     if (sql.includes('FROM feature_tags')) return this.featureTagRows as T[];
+    if (sql.includes('FROM folders')) return this.folderRows as T[];
     throw new Error(`unhandled getAllAsync: ${sql}`);
   }
 
@@ -129,5 +131,48 @@ describe('loadMapFeatures pin look', () => {
     ]);
     // The raw color stays null so colour filters don't match uncolored features.
     expect(props[0].color).toBeNull();
+  });
+});
+
+describe('loadMapFeatures folders', () => {
+  const folder = (id: number, parent_id: number | null, visible = 1) => ({ id, name: `f${id}`, color: null, parent_id, visible, sort: 0 });
+  const row = (id: number, folder_id: number | null) => ({
+    id,
+    folder_id,
+    type: 'point',
+    name: null,
+    color: null,
+    icon: null,
+    source: 'manual',
+    geometry: JSON.stringify(POINT),
+  });
+
+  async function load(folders: unknown[], rows: unknown[]) {
+    const { db, sqlite } = makeDb();
+    db.folderRows = folders;
+    db.featureRows = rows;
+    return (await loadMapFeatures(sqlite)).features.map((f) => f.properties);
+  }
+
+  it("stamps each feature with its folder and every folder above it (none when unfiled)", async () => {
+    // 1 > 2 > 3
+    const props = await load([folder(1, null), folder(2, 1), folder(3, 2)], [row(10, 3), row(11, 1), row(12, null)]);
+    expect(props.map((p) => [p.featureId, p.folder_ids])).toEqual([
+      [10, [1, 2, 3]],
+      [11, [1]],
+      [12, []],
+    ]);
+  });
+
+  it('leaves out features in a hidden folder AND in every folder nested inside it', async () => {
+    const folders = [folder(1, null, 0), folder(2, 1), folder(3, null)];
+    const props = await load(folders, [row(10, 1), row(11, 2), row(12, 3), row(13, null)]);
+    expect(props.map((p) => p.featureId)).toEqual([12, 13]);
+  });
+
+  it('a hidden subfolder does not hide its parent or siblings', async () => {
+    const folders = [folder(1, null), folder(2, 1, 0), folder(3, 1)];
+    const props = await load(folders, [row(10, 1), row(11, 2), row(12, 3)]);
+    expect(props.map((p) => p.featureId)).toEqual([10, 12]);
   });
 });

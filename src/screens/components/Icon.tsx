@@ -18,7 +18,8 @@ export type IconName =
   | 'area'
   | 'measure'
   | 'record'
-  | 'stop';
+  | 'stop'
+  | 'folder';
 
 /** Icons are laid out on a 24-unit grid and scaled to whatever `size` is asked for. */
 const GRID = 24;
@@ -169,6 +170,9 @@ export function Icon({ name, size = GRID, color: colorProp }: IconProps) {
         return [disc(12, 12, 14)];
       case 'stop':
         return [rect(6, 6, 12, 12, { borderRadius: u(2) })];
+      case 'folder':
+        // A tab on the back edge, then the body.
+        return [rect(3, 4.5, 8.5, 5, { borderRadius: u(1.6) }), rect(3, 7.5, 18, 12, { borderRadius: u(2.2) })];
     }
   })();
 

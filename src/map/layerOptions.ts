@@ -71,10 +71,10 @@ export const OVERLAYS: OverlayOption[] = [
   {
     id: 'huntUnits',
     group: 'land',
-    label: 'Hunting units (Idaho)',
-    note: 'Idaho Fish and Game hunt units, statewide and bundled with the app. Tap a boundary line or unit number for the unit, its elk zone and IDFG links. Best representation only — confirm boundaries in the current IDFG regulation booklet.',
+    label: 'Hunting units',
+    note: "Hunt units, management zones and hunt districts from each state's wildlife agency. Idaho is built in; download other states under Downloads → Hunting units and they keep working offline. Tap a boundary line or unit number for the unit and the agency's regulations. For reference only: boundaries can be out of date or inaccurate — check your state's current hunting regulations and local laws before you hunt.",
     legend: [{ color: HUNT_UNIT_COLOR, label: 'Unit boundary' }],
-    attribution: 'Idaho Fish and Game',
+    attribution: 'State wildlife agencies',
   },
 
   // --- Roads & trails ---

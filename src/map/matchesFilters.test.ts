@@ -13,17 +13,20 @@ function expressionMatches(filters: Filters, properties: FilterableProperties): 
   return evaluator.filter({ zoom: 10 } as never, { type: 1, properties } as never);
 }
 
+// `folder_ids` is the feature's folder plus every folder above it: the last feature sits in folder 3, inside folder 1.
 const FEATURES: FilterableProperties[] = [
-  { folder_id: 1, type: 'point', color: '#ff0000', tag_ids: [1, 2] },
-  { folder_id: 2, type: 'line', color: '#00ff00', tag_ids: [2] },
-  { folder_id: null, type: 'polygon', color: null, tag_ids: [] },
-  { folder_id: 1, type: 'polygon', color: '#ff0000', tag_ids: [3] },
+  { folder_ids: [1], type: 'point', color: '#ff0000', tag_ids: [1, 2] },
+  { folder_ids: [2], type: 'line', color: '#00ff00', tag_ids: [2] },
+  { folder_ids: [], type: 'polygon', color: null, tag_ids: [] },
+  { folder_ids: [1], type: 'polygon', color: '#ff0000', tag_ids: [3] },
+  { folder_ids: [1, 3], type: 'point', color: '#ff0000', tag_ids: [] },
 ];
 
 const FILTERS: Record<string, Filters> = {
   none: EMPTY_FILTERS,
   folder: { ...EMPTY_FILTERS, folderIds: [1] },
   folders: { ...EMPTY_FILTERS, folderIds: [1, 2] },
+  subfolder: { ...EMPTY_FILTERS, folderIds: [3] },
   emptyFolders: { ...EMPTY_FILTERS, folderIds: [] },
   type: { ...EMPTY_FILTERS, types: ['polygon'] },
   color: { ...EMPTY_FILTERS, colors: ['#ff0000'] },
@@ -46,8 +49,15 @@ describe('matchesFilters', () => {
     });
   }
 
+  it('a filter on a parent folder also matches what is nested inside it', () => {
+    const nested: FilterableProperties = { folder_ids: [1, 3], type: 'point', color: null, tag_ids: [] };
+    expect(matchesFilters(nested, { ...EMPTY_FILTERS, folderIds: [1] })).toBe(true); // parent
+    expect(matchesFilters(nested, { ...EMPTY_FILTERS, folderIds: [3] })).toBe(true); // itself
+    expect(matchesFilters(nested, { ...EMPTY_FILTERS, folderIds: [2] })).toBe(false); // an unrelated folder
+  });
+
   it('never matches an uncolored or unfiled feature against a color/folder filter', () => {
-    const unfiled: FilterableProperties = { folder_id: null, type: 'point', color: null, tag_ids: [] };
+    const unfiled: FilterableProperties = { folder_ids: [], type: 'point', color: null, tag_ids: [] };
     expect(matchesFilters(unfiled, { ...EMPTY_FILTERS, folderIds: [1] })).toBe(false);
     expect(matchesFilters(unfiled, { ...EMPTY_FILTERS, colors: ['#ff0000'] })).toBe(false);
     expect(matchesFilters(unfiled, EMPTY_FILTERS)).toBe(true);

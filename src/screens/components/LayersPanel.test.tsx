@@ -64,7 +64,7 @@ describe('LayersPanel groups', () => {
     mount();
     const rendered = texts();
     expect(rendered).toContain('Public land');
-    expect(rendered).toContain('Hunting units (Idaho)');
+    expect(rendered).toContain('Hunting units');
     expect(rendered).not.toContain('Weather radar');
     expect(rendered).not.toContain('Wetlands (NWI)');
     expect(rendered).not.toContain('USFS trails');

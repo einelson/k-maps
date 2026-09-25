@@ -44,6 +44,8 @@ yarn-error.*
 /packs/*.mbtiles
 /packs/*.pmtiles
 /packs/*.geojsonl
+# region packs built by tools/build_region_pack.mjs (published to the `data` GitHub release)
+/packs/build/
 
 # tile packs downloaded on-device
 /maps/

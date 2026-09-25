@@ -85,6 +85,7 @@ describe('GPX export -> import round trip', () => {
       featuresToGpx([makeFeature(POINT, { name: 'Camp', notes: 'Flat spot near the creek' })])
     );
     expect(parsed).toEqual({
+      color: null,
       name: 'Camp',
       notes: 'Flat spot near the creek',
       geometry: POINT,
@@ -139,9 +140,9 @@ describe('GPX export -> import round trip', () => {
     expect(parsed.map((f) => f.name)).toEqual(['wpt1', 'wpt2', 'track1', 'track2']);
   });
 
-  it('loses colour on the round trip and reports null for missing names', () => {
+  it('does not export colour, so it is null on re-import, and reports null for missing names', () => {
     const [parsed] = parseGpx(featuresToGpx([makeFeature(POINT, { color: '#e11d48' })]));
-    expect(parsed).not.toHaveProperty('color');
+    expect(parsed.color).toBeNull();
     expect(parsed.name).toBeNull();
     expect(parsed.notes).toBeNull();
   });
@@ -184,6 +185,7 @@ describe('parseGpx: importing third-party files', () => {
         notes: 'via the pass',
         geometry: { type: 'LineString', coordinates: [[2, 1], [4, 3], [6, 5]] },
         folderPath: [],
+        color: null,
       },
     ]);
   });
@@ -267,7 +269,7 @@ describe('parseGpx: importing third-party files', () => {
     expect(parsed).toHaveLength(1);
   });
 
-  it('parses a 3D coordinate track into 2D positions (elevation is not imported)', () => {
+  it('keeps track geometry 2D even when points have elevation (elevation goes to the track samples)', () => {
     const parsed = parseGpx(
       gpxDoc(`<trk><trkseg><trkpt lat="1" lon="2"><ele>100</ele></trkpt><trkpt lat="3" lon="4"><ele>200</ele></trkpt></trkseg></trk>`)
     );
@@ -343,5 +345,198 @@ describe('parseGpx: known issues', () => {
   it('decodes numeric character references', () => {
     const [wpt] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><desc>a&#10;b &#233;</desc></wpt>'));
     expect(wpt.notes).toBe('a\nb é');
+  });
+});
+
+describe('parseGpx: notes from <cmt>', () => {
+  it('uses <cmt> when there is no <desc>', () => {
+    const [f] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><cmt>Garmin comment</cmt></wpt>'));
+    expect(f.notes).toBe('Garmin comment');
+  });
+
+  it('joins <desc> and a different <cmt>, but not identical text twice', () => {
+    const [both] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><desc>Desc</desc><cmt>Cmt</cmt></wpt>'));
+    expect(both.notes).toBe('Desc\n\nCmt');
+    const [same] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><desc>Same</desc><cmt>Same</cmt></wpt>'));
+    expect(same.notes).toBe('Same');
+  });
+
+  it('treats blank <desc>/<cmt> as no notes', () => {
+    const [f] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><desc>  </desc><cmt/></wpt>'));
+    expect(f.notes).toBeNull();
+  });
+
+  it('reads a name that carries an attribute', () => {
+    const [f] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><name lang="en">Camp</name></wpt>'));
+    expect(f.name).toBe('Camp');
+  });
+});
+
+describe('parseGpx: extension colors', () => {
+  it("reads Garmin's gpxx:DisplayColor on a track", () => {
+    const [f] = parseGpx(
+      gpxDoc(`<trk><name>T</name><extensions><gpxx:TrackExtension xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3">
+        <gpxx:DisplayColor>DarkGreen</gpxx:DisplayColor></gpxx:TrackExtension></extensions>
+        <trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk>`)
+    );
+    expect(f.color).toBe('#22c55e');
+  });
+
+  it("reads OsmAnd/Organic-Maps-style <color> hex on a waypoint, alpha first", () => {
+    const [f] = parseGpx(gpxDoc('<wpt lat="1" lon="2"><extensions><color>#ffff0000</color></extensions></wpt>'));
+    expect(f.color).toBe('#e11d48');
+  });
+
+  it('finds a namespaced color one level down on a route', () => {
+    const [f] = parseGpx(
+      gpxDoc(`<rte><extensions><osmand:appearance><osmand:color>#0000ff</osmand:color></osmand:appearance></extensions>
+        <rtept lat="1" lon="2"/><rtept lat="3" lon="4"/></rte>`)
+    );
+    expect(f.color).toBe('#6366f1');
+  });
+
+  it('gives null for unknown color names, white, and extensions without a color', () => {
+    const parsed = parseGpx(
+      gpxDoc(`<wpt lat="1" lon="2"><extensions><color>chartreuse</color></extensions></wpt>
+        <wpt lat="1" lon="2"><extensions><color>#ffffff</color></extensions></wpt>
+        <wpt lat="1" lon="2"><extensions><speed>3</speed></extensions></wpt>`)
+    );
+    expect(parsed.map((f) => f.color)).toEqual([null, null, null]);
+  });
+});
+
+describe('track samples: export', () => {
+  const two = { ...LINE, coordinates: [[-116.2, 43.6], [-116.1, 43.7]] } as typeof LINE;
+  const feature = (id: number) => makeFeature(two, { id, name: 'Hike', type: 'line', source: 'track' });
+
+  it('writes <ele> and an ISO <time> for each point of a track that has samples', () => {
+    const xml = featuresToGpx(
+      [feature(7)],
+      new Map([[7, { times: [Date.UTC(2026, 8, 24, 17, 2, 3), Date.UTC(2026, 8, 24, 17, 2, 33, 500)], elevations: [1500.5, 1512] }]])
+    );
+    expect(XMLValidator.validate(xml)).toBe(true);
+    expect(xml).toContain('<trkpt lat="43.6" lon="-116.2"><ele>1500.5</ele><time>2026-09-24T17:02:03.000Z</time></trkpt>');
+    expect(xml).toContain('<trkpt lat="43.7" lon="-116.1"><ele>1512</ele><time>2026-09-24T17:02:33.500Z</time></trkpt>');
+  });
+
+  it('writes only what exists: times without elevations, elevations with gaps', () => {
+    const timesOnly = featuresToGpx([feature(1)], new Map([[1, { times: [0, 1000], elevations: null }]]));
+    expect(timesOnly).toContain('<time>1970-01-01T00:00:00.000Z</time>');
+    expect(timesOnly).not.toContain('<ele>');
+
+    const gaps = featuresToGpx([feature(2)], new Map([[2, { times: null, elevations: [10, null] }]]));
+    expect(gaps).toContain('<trkpt lat="43.6" lon="-116.2"><ele>10</ele></trkpt>');
+    expect(gaps).toContain('<trkpt lat="43.7" lon="-116.1"/>');
+    expect(gaps).not.toContain('<time>');
+  });
+
+  it('leaves a track bare when it has no samples, or samples for a different number of points', () => {
+    const none = featuresToGpx([feature(1)]);
+    expect(none).toContain('<trkpt lat="43.6" lon="-116.2"/>');
+    const wrong = featuresToGpx([feature(3)], new Map([[3, { times: [0, 1, 2], elevations: [1, 2, 3] }]]));
+    expect(wrong).not.toContain('<ele>');
+    expect(wrong).not.toContain('<time>');
+  });
+
+  it('uses whichever half still lines up when only one does', () => {
+    const xml = featuresToGpx([feature(4)], new Map([[4, { times: [0, 1000, 2000], elevations: [5, 6] }]]));
+    expect(xml).toContain('<ele>5</ele>');
+    expect(xml).not.toContain('<time>');
+  });
+
+  it('never attaches samples to a polygon or a waypoint', () => {
+    const polygon = makeFeature(POLYGON, { id: 5, type: 'polygon' });
+    const pin = makeFeature(POINT, { id: 6 });
+    const samples = { times: [0, 1, 2, 3, 4], elevations: [1, 2, 3, 4, 5] };
+    const xml = featuresToGpx([polygon, pin], new Map([[5, samples], [6, samples]]));
+    expect(xml).not.toContain('<ele>');
+    expect(xml).not.toContain('<time>');
+  });
+
+  it('round-trips through parseGpx exactly', () => {
+    const samples = { times: [Date.UTC(2026, 0, 1, 12), Date.UTC(2026, 0, 1, 12, 0, 30)], elevations: [1500.5, null] };
+    const [parsed] = parseGpx(featuresToGpx([feature(9)], new Map([[9, samples]])));
+    expect(parsed.track).toEqual(samples);
+    expect(parsed.geometry).toEqual(two);
+  });
+});
+
+describe('track samples: import', () => {
+  const trk = (points: string) => gpxDoc(`<trk><name>T</name><trkseg>${points}</trkseg></trk>`);
+
+  it('reads time and elevation for every point of a track', () => {
+    const [f] = parseGpx(
+      trk(`<trkpt lat="1" lon="2"><ele>100.5</ele><time>2026-09-24T17:00:00Z</time></trkpt>
+        <trkpt lat="3" lon="4"><ele>110</ele><time>2026-09-24T17:01:00Z</time></trkpt>`)
+    );
+    expect(f.track).toEqual({
+      times: [Date.UTC(2026, 8, 24, 17, 0, 0), Date.UTC(2026, 8, 24, 17, 1, 0)],
+      elevations: [100.5, 110],
+    });
+  });
+
+  it('accepts fractional seconds and time-zone offsets', () => {
+    const [f] = parseGpx(
+      trk(`<trkpt lat="1" lon="2"><time>2026-09-24T17:00:00.250Z</time></trkpt>
+        <trkpt lat="3" lon="4"><time>2026-09-24T11:01:00-06:00</time></trkpt>`)
+    );
+    expect(f.track!.times).toEqual([Date.UTC(2026, 8, 24, 17, 0, 0, 250), Date.UTC(2026, 8, 24, 17, 1, 0)]);
+  });
+
+  it('keeps elevations only when some point has no time (a partly stamped track has no duration)', () => {
+    const [f] = parseGpx(
+      trk(`<trkpt lat="1" lon="2"><ele>1</ele><time>2026-09-24T17:00:00Z</time></trkpt>
+        <trkpt lat="3" lon="4"><ele>2</ele></trkpt>`)
+    );
+    expect(f.track).toEqual({ times: null, elevations: [1, 2] });
+  });
+
+  it('keeps times only when no point has an elevation', () => {
+    const [f] = parseGpx(
+      trk(`<trkpt lat="1" lon="2"><time>2026-09-24T17:00:00Z</time></trkpt><trkpt lat="3" lon="4"><time>2026-09-24T17:00:10Z</time></trkpt>`)
+    );
+    expect(f.track).toEqual({ times: [Date.UTC(2026, 8, 24, 17, 0, 0), Date.UTC(2026, 8, 24, 17, 0, 10)], elevations: null });
+  });
+
+  it('leaves gaps in elevations as null and treats junk as a gap', () => {
+    const [f] = parseGpx(
+      trk(`<trkpt lat="1" lon="2"><ele>5</ele></trkpt><trkpt lat="3" lon="4"/><trkpt lat="5" lon="6"><ele>abc</ele></trkpt><trkpt lat="7" lon="8"><ele> </ele></trkpt>`)
+    );
+    expect(f.track!.elevations).toEqual([5, null, null, null]);
+  });
+
+  it('ignores an unparseable time as missing', () => {
+    const [f] = parseGpx(trk(`<trkpt lat="1" lon="2"><ele>1</ele><time>yesterday</time></trkpt><trkpt lat="3" lon="4"><ele>2</ele></trkpt>`));
+    expect(f.track!.times).toBeNull();
+  });
+
+  it('drops a point with bad coordinates from the samples too, so the rest stay lined up', () => {
+    const [f] = parseGpx(
+      trk(`<trkpt lat="1" lon="2"><ele>10</ele></trkpt><trkpt lat="x" lon="4"><ele>999</ele></trkpt><trkpt lat="5" lon="6"><ele>30</ele></trkpt>`)
+    );
+    expect((f.geometry as { coordinates: number[][] }).coordinates).toEqual([[2, 1], [6, 5]]);
+    expect(f.track!.elevations).toEqual([10, 30]);
+  });
+
+  it('gives no track samples when there is neither time nor elevation', () => {
+    const [f] = parseGpx(trk(`<trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/>`));
+    expect(f).not.toHaveProperty('track');
+  });
+
+  it('gives each segment of a multi-segment track its own samples', () => {
+    const parsed = parseGpx(
+      gpxDoc(`<trk><trkseg><trkpt lat="1" lon="2"><ele>1</ele></trkpt><trkpt lat="3" lon="4"><ele>2</ele></trkpt></trkseg>
+        <trkseg><trkpt lat="5" lon="6"><ele>7</ele></trkpt><trkpt lat="7" lon="8"><ele>8</ele></trkpt></trkseg></trk>`)
+    );
+    expect(parsed.map((f) => f.track!.elevations)).toEqual([[1, 2], [7, 8]]);
+  });
+
+  it('does not attach samples to routes or waypoints', () => {
+    const parsed = parseGpx(
+      gpxDoc(`<wpt lat="1" lon="2"><ele>50</ele><time>2026-09-24T17:00:00Z</time></wpt>
+        <rte><rtept lat="1" lon="2"><ele>1</ele></rtept><rtept lat="3" lon="4"><ele>2</ele></rtept></rte>`)
+    );
+    expect(parsed).toHaveLength(2);
+    for (const f of parsed) expect(f).not.toHaveProperty('track');
   });
 });

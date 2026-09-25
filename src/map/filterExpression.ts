@@ -17,7 +17,9 @@ export function buildFeatureFilter(filters: Filters): FilterSpecification {
   const clauses: unknown[] = [];
 
   if (filters.folderIds) {
-    clauses.push(['in', ['get', 'folder_id'], ['literal', filters.folderIds]]);
+    // A feature carries its folder and all its ancestors in `folder_ids`, so picking a parent folder
+    // also shows what's nested inside it. An empty list ('any' of nothing) matches nothing.
+    clauses.push(['any', ...filters.folderIds.map((id) => ['in', id, ['get', 'folder_ids']])]);
   }
   if (filters.types) {
     clauses.push(['in', ['get', 'type'], ['literal', filters.types]]);
@@ -35,7 +37,7 @@ export function buildFeatureFilter(filters: Filters): FilterSpecification {
 
 /** The feature properties the §7.2 filters look at (a subset of MapFeatureProperties). */
 export interface FilterableProperties {
-  folder_id: number | null;
+  folder_ids: number[];
   type: string;
   color: string | null;
   tag_ids: number[];
@@ -51,7 +53,7 @@ export interface FilterableProperties {
  */
 export function matchesFilters(properties: FilterableProperties, filters: Filters): boolean {
   if (filters.folderIds) {
-    if (properties.folder_id == null || !filters.folderIds.includes(properties.folder_id)) return false;
+    if (!filters.folderIds.some((id) => properties.folder_ids.includes(id))) return false;
   }
   if (filters.types && !filters.types.includes(properties.type as never)) return false;
   if (filters.colors) {

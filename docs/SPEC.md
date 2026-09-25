@@ -291,6 +291,14 @@ CREATE TABLE feature_tags (
 
 CREATE TABLE photos (id INTEGER PRIMARY KEY, feature_id INTEGER REFERENCES features(id) ON DELETE CASCADE, path TEXT);
 
+-- The recording in progress (single row) and its fixes, written by the background location task:
+CREATE TABLE recording_session (id INTEGER PRIMARY KEY CHECK (id = 1), started_at INTEGER NOT NULL);
+CREATE TABLE recording_fixes (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, lon REAL NOT NULL, lat REAL NOT NULL, altitude REAL);
+
+-- Recorded/imported tracks: per-point time and altitude, index-aligned with the line's coordinates
+-- (JSON: {"t": [epoch ms]|null, "e": [metres|null]|null}). Kept out of `geometry` so the line stays [lon, lat].
+CREATE TABLE track_data (feature_id INTEGER PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE, data TEXT NOT NULL);
+
 -- Offline coverage
 CREATE TABLE coverage (
   layer TEXT, cell_x INTEGER, cell_y INTEGER,
@@ -348,7 +356,13 @@ Performance: enable clustering for points at low zoom. Thousands of items is fin
 - Sync later, if wanted: the user's own cloud folder, so no server is needed
 
 ### 7.5 GPS tracks (Phase 5)
-Record a breadcrumb line with `expo-location`, save as a `line` with `source='track'`. Background location needs extra permissions and battery care.
+Record a breadcrumb line with `expo-location`, save as a `line` with `source='track'`, and keep each fix's time and altitude in `track_data`.
+
+Recording runs in the background (screen locked, app closed) as an `expo-location` task under an Android foreground service with a visible notification. The task appends each fix to SQLite (`recording_session`, `recording_fixes`) so nothing depends on the app's JS being alive; the app mirrors that table into memory while open and saves the track from it. Started while the app is on screen, the service needs only the ordinary location permission (no "Allow all the time"); it needs `FOREGROUND_SERVICE_LOCATION` on Android 14+ and, to show the notification on Android 13+, `POST_NOTIFICATIONS`.
+
+While recording, a map button shows elapsed time and distance and opens a panel: live stats and charts, Delete, and End & save.
+
+Tapping a track opens its dashboard: distance, elapsed and moving time, average speed, climb/descent/high/low point, an elevation chart (against time or distance) and a distance-over-time chart, plus the usual name/folder/color/tags and a GPX export that carries `<time>` and `<ele>`. Imported GPX tracks that have timestamps or elevation get the same dashboard.
 
 ---
 
@@ -375,18 +389,34 @@ Record a breadcrumb line with `expo-location`, save as a `line` with `source='tr
   /screens
   /state        Zustand stores
 /tools          laptop scripts: PAD-US → MBTiles, OSM extract, pack manifest
-/packs          generated land_*.mbtiles, osm_*.mbtiles, manifest.json
+/packs          region pack build output (git-ignored) — see packs/README.md
 ```
 
-**Pack manifest** (hosted next to the vector packs) so the app can list and version them:
+**Region packs (as built).** The overlay layers render from per-cell GeoJSON files, not MBTiles, so the
+hosted packs are zips of those cell files rather than the `land_*.mbtiles` sketched in the original design.
+`tools/build_region_pack.mjs` builds `<region>-<layer>.zip` for `land`, `mvum` and `trails` plus a
+`manifest.json`, published to a rolling `data` GitHub release; the app installs them from Downloads
+(`src/downloads/regionPackInstaller.ts`). Manifest (`src/packs/regionPacks.ts`, `format` bumps on any
+incompatible change):
 ```json
 {
-  "packs": [
-    { "id": "land_id", "layer": "land", "name": "Idaho public land", "version": "padus-4.1",
-      "bytes": 0, "url": "https://…/land_id.mbtiles", "bbox": [-117.3, 41.9, -111.0, 49.0] }
+  "format": 1,
+  "regions": [
+    { "id": "idaho", "name": "Idaho", "cells": [[179, 351], [180, 351]],
+      "packs": [{ "layer": "land", "file": "idaho-land.zip", "bytes": 14921439, "version": "2026-09-25T00:12:49.148Z" }] }
   ]
 }
 ```
+**Hunting units (as built).** Every state agency's hunt units / management zones are downloaded as one small zip per
+state (`hunt-<st>.zip`, a single normalized GeoJSON `units.json`), listed under `huntUnits` in the same manifest with
+each state's bounding box, unit sets (species) and source agency. Idaho is bundled; the others install from
+Downloads and are drawn from a local `file://` GeoJSON source, so they work offline. Only states overlapping the view
+are mounted (`src/map/huntUnitWindow.ts`). Sources and per-state column mappings: `src/huntUnits/registry.ts`.
+
+Because a region installs hundreds of cells and each mounted cell is a MapLibre source plus style layers,
+the map only mounts cells near the view (`src/map/cellWindow.ts`). If that proves too limiting (no
+low-zoom overview), the next step is one MBTiles vector-tile pack per region and layer, as this section
+originally proposed.
 
 ---
 

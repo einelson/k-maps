@@ -1,11 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
+import type { Position } from 'geojson';
 
 import { deleteFeature, rebuildSearchIndex } from '../data/featuresRepo';
+import { exportFeatures } from '../data/importExport';
+import { folderPathLabel } from '../data/folderTree';
 import { listFolders } from '../data/foldersRepo';
 import {
   addTagToFeature,
@@ -14,11 +17,13 @@ import {
   listTagsForFeature,
   removeTagFromFeature,
 } from '../data/tagsRepo';
+import { getTrackData } from '../data/trackDataRepo';
 import type { Feature, Folder, Tag } from '../data/types';
 import { FEATURE_COLOR_PALETTE } from '../features/colorPalette';
 import { formatCoordinate } from '../features/coordinates';
 import { openDirections } from '../features/directions';
 import { DEFAULT_PIN_COLOR, resolvePinStyle, type PinStyleId } from '../features/pinStyles';
+import type { TrackSamples } from '../features/trackStats';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { useSettingsStore, type CoordinateFormat } from '../state/useSettingsStore';
 import { Text, TextInput, useThemedStyles, type ThemeColors } from '../theme';
@@ -26,12 +31,23 @@ import { BottomSheet } from './components/BottomSheet';
 import { FolderPickerModal } from './components/FolderPickerModal';
 import { PhotoStrip } from './components/PhotoStrip';
 import { PinStylePicker } from './components/PinStylePicker';
+import { TrackDashboard } from './components/TrackDashboard';
 
 /** GeoJSON coordinates are [lon, lat]; returns null for non-point geometry (or a Directions button doesn't apply). */
 function parsePointLonLat(geometry: string): [number, number] | null {
   try {
     const parsed = JSON.parse(geometry) as { type: string; coordinates: unknown };
     return parsed.type === 'Point' ? (parsed.coordinates as [number, number]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The vertices of a line feature's geometry, or null for anything else. */
+function parseLineCoordinates(geometry: string): Position[] | null {
+  try {
+    const parsed = JSON.parse(geometry) as { type: string; coordinates: Position[] };
+    return parsed.type === 'LineString' ? parsed.coordinates : null;
   } catch {
     return null;
   }
@@ -58,6 +74,7 @@ export function FeatureDetailScreen() {
   const coordinateFormat = useSettingsStore((s) => s.coordinateFormat);
 
   const [feature, setFeature] = useState<Feature | null>(null);
+  const [samples, setSamples] = useState<TrackSamples | null>(null);
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
   const [color, setColor] = useState<string | null>(null);
@@ -71,13 +88,15 @@ export function FeatureDetailScreen() {
   const [newTagName, setNewTagName] = useState('');
 
   const load = useCallback(async () => {
-    const [row, folderRows, tagRows, allTagRows] = await Promise.all([
+    const [row, folderRows, tagRows, allTagRows, trackSamples] = await Promise.all([
       db.getFirstAsync<Feature>('SELECT * FROM features WHERE id = ?', featureId),
       listFolders(db),
       listTagsForFeature(db, featureId),
       listTags(db),
+      getTrackData(db, featureId),
     ]);
     setFeature(row);
+    setSamples(trackSamples);
     setName(row?.name ?? '');
     setNotes(row?.notes ?? '');
     setColor(row?.color ?? null);
@@ -144,6 +163,17 @@ export function FeatureDetailScreen() {
     ]);
   }
 
+  const lineCoordinates = useMemo(() => (feature ? parseLineCoordinates(feature.geometry) : null), [feature]);
+
+  async function handleExportGpx() {
+    if (!feature) return;
+    try {
+      await exportFeatures([feature], 'gpx', name || 'track', db);
+    } catch (err) {
+      Alert.alert('Export failed', err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (!feature) {
     return (
       <View style={styles.container}>
@@ -153,13 +183,23 @@ export function FeatureDetailScreen() {
   }
 
   const unassignedTags = allTags.filter((t) => !featureTags.some((ft) => ft.id === t.id));
-  const currentFolder = folders.find((f) => f.id === folderId);
+  const currentFolderLabel = folderPathLabel(folders, folderId);
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingBottom: 16 + insets.bottom }]}
     >
+      {/* Recorded and imported tracks lead with their stats; a plain drawn line has none to show. */}
+      {lineCoordinates && (feature.source === 'track' || samples) && (
+        <>
+          <TrackDashboard coordinates={lineCoordinates} samples={samples} recorded={feature.source === 'track'} />
+          <Pressable style={styles.exportButton} onPress={handleExportGpx}>
+            <Text style={styles.directionsButtonText}>Export GPX (with time and elevation)</Text>
+          </Pressable>
+        </>
+      )}
+
       <Text style={styles.label}>Name</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Untitled" />
 
@@ -173,7 +213,7 @@ export function FeatureDetailScreen() {
 
       <Text style={styles.label}>Folder</Text>
       <Pressable style={styles.folderButton} onPress={() => setFolderPickerOpen(true)}>
-        <Text style={styles.folderButtonText}>{currentFolder?.name ?? 'None'}</Text>
+        <Text style={styles.folderButtonText}>{currentFolderLabel || 'None'}</Text>
       </Pressable>
 
       <Text style={styles.label}>Color</Text>
@@ -314,6 +354,14 @@ const makeStyles = (c: ThemeColors) =>
       borderColor: c.primaryText,
     },
     addTagChipText: { fontSize: 12, fontWeight: '600', color: c.primaryText },
+    exportButton: {
+      marginTop: 4,
+      borderWidth: 1,
+      borderColor: c.primaryText,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
     saveButton: {
       marginTop: 24,
       backgroundColor: c.primary,
