@@ -132,7 +132,7 @@ export function OnDeviceTab({ coverage, reloadCoverage }: Props) {
 
       {byLayer.length === 0 && (
         <Text style={styles.body}>
-          Use Pick an area or Ready-made to save maps and data for offline use. Public land, forest roads and trails
+          Use Pick an area or State overlays to save maps and data for offline use. Public land, forest roads and trails
           also save themselves as you browse the main map online.
         </Text>
       )}

@@ -85,7 +85,7 @@ export const OVERLAYS: OverlayOption[] = [
     id: 'osm',
     group: 'roads',
     label: 'Roads & trails (OSM)',
-    note: 'OpenStreetMap roads, dirt tracks and trails with names, drawn over any base map (dashed = track/trail). Download whole states under Downloads → Ready-made, or pick an area there. Topo and Hybrid already have roads baked in.',
+    note: 'OpenStreetMap roads, dirt tracks and trails with names, drawn over any base map (dashed = track/trail). Download whole states under Downloads → State overlays, or pick an area there. Topo and Hybrid already have roads baked in.',
     attribution: '© OpenStreetMap contributors',
   },
   {

@@ -54,7 +54,7 @@ token they rely on; what's untested is how they look and behave on the phone.
   fine a state at a time, too much to ship in the app, which is why panning, Pick an area and region packs
   exist instead of one big download
 - **Downloads is three tabs, not one long scroll.** *Pick an area* (the map, what to save, a footer
-  that always shows the total, and the Download button at the right end of the header), *Ready-made* (a state's land
+  that always shows the total, and the Download button at the right end of the header), *State overlays* (overlay data only, labelled as such — a state's land
   and trail data, and hunting units — the hunting-units list starts folded, with the states already on the phone first)
   and *On this phone* (what's stored **split by state**, free space, delete overlay data a state or a layer at a time).
   Under the map, *2 · Choose what to save* is a folded bar that summarises the choices; tapping it opens the options in
@@ -69,12 +69,12 @@ token they rely on; what's untested is how they look and behave on the phone.
   footer shows size and time before you start and says why the Download button is off (for example, the
   phone has no room); anything over 1 GB asks first, and live progress (Cancel, and which files failed
   and why) keeps running if you leave the screen (`src/downloads/startDownload.ts`)
-- **Whole state, with everything.** Ready-made packs only carry overlay data (land, forest roads, trails, OSM, POI) —
+- **Whole state, with everything.** State overlays packs only carry overlay data (land, forest roads, trails, OSM, POI) —
   never offline map pictures. *Pick an area → Pick a whole state…* selects every square of a state (all 50, from the
   bundled `assets/us/us-state-cells.json`; a state can go past the 500-square hand-picking cap) so the same layer choices
-  apply, map pictures included. When a state is picked whole and its ready-made pack is published, its overlay layers
+  apply, map pictures included. When a state is picked whole and its State overlays pack is published, its overlay layers
   install from the pack (a few zips) and only the map pictures are fetched square by square
-  (`planDownload`'s `region` jobs); anything else falls back to per-square fetching. Ready-made state cards link to
+  (`planDownload`'s `region` jobs); anything else falls back to per-square fetching. State overlays cards link to
   Pick an area with the state already picked ("Also save offline map pictures of …")
 - **Remembers how you left the app.** Base map, which layers are on and their opacity, name labels,
   offline-maps and load-as-I-pan switches, POI toggles, the active map filters and saved filter presets,
@@ -91,7 +91,7 @@ token they rely on; what's untested is how they look and behave on the phone.
   Mexico), and in a coast or border cell OSM roads and POI pins outside the US are cut away (`src/packs/usFilter.ts`).
   The as-you-pan loader skips such cells, and the Downloads picker can't pick them ("There is no US land there").
   Coordinates on the border are good to about 250 m, the resolution of the source boundaries
-- **Whole states (Downloads → Ready-made).** All 50 states are prebuilt on the repo's rolling `data` GitHub release,
+- **Whole states (Downloads → State overlays).** All 50 states are prebuilt on the repo's rolling `data` GitHub release,
   each as up to five layers — public land + private shading, forest roads (MVUM), USFS trails, OpenStreetMap roads &
   trails and OSM points of interest — one download per layer instead of fetching hundreds of cells from the public
   services. A layer over ~50 MB is split into ~40 MB parts (the app unzips a file in memory), installed one after
@@ -288,7 +288,7 @@ token they rely on; what's untested is how they look and behave on the phone.
   to about 250 m (Chesapeake Bay and some other bays count as US land, as in the Census file). Territories (Puerto
   Rico, Guam, ...) are not covered
 - OSM roads & trails and POI pins are prebuilt for all 50 states, but a cell you pick yourself is fetched from the
-  public Overpass servers, which take minutes per cell — use Ready-made for anything bigger than a few cells
+  public Overpass servers, which take minutes per cell — use State overlays for anything bigger than a few cells
 - Radar, NHD, NWI, slope angle and land managers are online-only rasters: nothing to download, no
   offline copy, no tap-to-identify. The spec's true-vector NHD/NWI (`ogr2ogr` → `tippecanoe`) and a
   build-time slope raster (`gdaldem slope`) would fix that but need a hosted tile pack

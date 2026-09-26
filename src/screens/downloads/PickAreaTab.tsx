@@ -48,7 +48,7 @@ interface Props {
   /** Where the map starts, so it stays where you left it when you switch tabs and back. */
   initialView: { center: [number, number]; zoom: number };
   onViewChange: (view: { center: [number, number]; zoom: number }) => void;
-  onSeeReadyMade: () => void;
+  onSeeOverlays: () => void;
 }
 
 /** Won't start a download that needs more than this share of the phone's free space. */
@@ -63,7 +63,7 @@ const CONFIRM_BYTES = 1_000_000_000;
  * shows the total. The Download button sits at the right end of the screen's header, so the picklist keeps the room. A tap picks a block of squares sized to the zoom (blockSelect.ts),
  * so zooming out picks a whole region in a few taps.
  */
-export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, onViewChange, onSeeReadyMade }: Props) {
+export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, onViewChange, onSeeOverlays }: Props) {
   const appDb = useSQLiteContext();
   const styles = useThemedStyles(makeStyles);
   const units = useSettingsStore((s) => s.units);
@@ -261,7 +261,7 @@ export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, o
     if (selectedCells.length === 0) return 'Tap the map to pick an area first.';
     if (nothingChosen) return 'Choose what to save under step 2.';
     if (selectedPackLayers.length > 0 && whole.states.length > 0 && manifest.status === 'loading') {
-      return 'Checking for ready-made state packs…';
+      return 'Checking for state overlay packs…';
     }
     if (plan.jobs.length === 0) return 'Everything you picked is already on this phone.';
     const free = freeDiskBytes(); // a cheap read, only reached once there is something to download
@@ -403,9 +403,9 @@ export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, o
               <Text style={styles.body}>
                 Tap the map to pick squares (each is about {units === 'imperial' ? '18 miles' : '30 km'} across), or pan
                 until the + is over one and press the Pick button. Zoom out first to pick a whole region in a few taps.
-                Only need land and trail data for a whole state? Try{' '}
-                <Text style={styles.link} onPress={onSeeReadyMade}>
-                  Ready-made downloads
+                Only need the overlays (land, trails, hunt units) for a whole state, not the map? Try{' '}
+                <Text style={styles.link} onPress={onSeeOverlays}>
+                  State overlays
                 </Text>
                 .
               </Text>
@@ -422,7 +422,7 @@ export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, o
               <Text style={styles.body}>
                 Whole state{whole.states.length === 1 ? '' : 's'}: {whole.states.map((state) => state.name).join(', ')}.
                 {plan.jobs.some((job) => job.kind === 'region')
-                  ? ' Land and trail data installs from the ready-made pack, so it is quick; map pictures are saved square by square.'
+                  ? ' Land and trail data installs from the state overlay pack, so it is quick; map pictures are saved square by square.'
                   : ''}
               </Text>
             )}

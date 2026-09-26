@@ -133,7 +133,7 @@ Each extra zoom level is **4x**. Default recommendation: **z16 for imagery, z16 
 5. Actions per cell: pause, resume, delete, update.
 6. Storage screen: size by layer and by cell, "delete all satellite", etc.
 
-**As built.** Downloads is three tabs (Pick an area / Ready-made / On this phone). Instead of dragging a
+**As built.** Downloads is three tabs (Pick an area / State overlays / On this phone). Instead of dragging a
 rectangle, a tap picks a *block* of cells whose side doubles as the map zooms out (1, 2, 4, 8, 16 cells; always
 roughly a finger's width on screen), aligned to the grid so blocks tile exactly (`src/downloads/blockSelect.ts`),
 plus "pick everything in view", with a cap of 500 cells per download. The plan skips anything already complete
@@ -380,7 +380,7 @@ Tapping a track opens its dashboard: distance, elapsed and moving time, average 
 
 1. **Map**: base map, layers button, filter chips, draw toolbar, GPS button, compass, scale bar, coordinate readout
 2. **Layers sheet**: base map switcher, overlay toggles + opacity, land legend, saved views
-3. **Downloads**: three tabs — pick an area (cell grid with zoom-scaled block selection, layer and detail picker, size estimate, progress), ready-made regions and hunting units, and a storage manager
+3. **Downloads**: three tabs — pick an area (cell grid with zoom-scaled block selection, layer and detail picker, size estimate, progress), state overlay packs (overlay data only) and hunting units, and a storage manager
 4. **Items**: list by folder, search, multi-select (move, recolor, tag, delete, export)
 5. **Feature detail/editor**: name, notes, photos, folder, color, icon, tags, coordinates
 6. **Import/Export and backup**

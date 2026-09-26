@@ -11,7 +11,7 @@ interface Props {
   onClose: () => void;
   /** Codes of the states whose every square is picked. */
   picked: ReadonlySet<string>;
-  /** Ids of the states that have a ready-made pack published (their land and trail data installs in one go). */
+  /** Ids of the states that have a State overlays pack published (their land and trail data installs in one go). */
   packedIds: ReadonlySet<string>;
   /** Tapping a state picks all of it, or — when it is already picked whole — puts it back. */
   onToggle: (state: UsState) => void;
@@ -30,8 +30,8 @@ export function StatePickerSheet({ visible, onClose, picked, packedIds, onToggle
     <BottomSheet visible={visible} onClose={onClose} maxHeight="85%">
       <Text style={styles.title}>Pick a whole state</Text>
       <Text style={styles.hint}>
-        Picks every square of the state, so you can save map pictures for all of it — not just the land and trail data
-        Ready-made offers.
+        Picks every square of the state, so you can save map pictures for all of it — not just the overlay data State
+        overlays offers.
       </Text>
       <TextInput
         style={styles.search}
@@ -57,7 +57,7 @@ export function StatePickerSheet({ visible, onClose, picked, packedIds, onToggle
               <View style={styles.rowText}>
                 <Text style={styles.name}>{state.name}</Text>
                 <Text style={styles.note}>
-                  {squares} squares{packedIds.has(state.id) ? ' · ready-made land & trail data' : ''}
+                  {squares} squares{packedIds.has(state.id) ? ' · overlay pack ready' : ''}
                 </Text>
               </View>
               <Text style={on ? styles.picked : styles.pick}>{on ? 'Picked ✓' : 'Pick'}</Text>

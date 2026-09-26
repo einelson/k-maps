@@ -104,7 +104,7 @@ export function LayersScreen() {
           look at and keeps them on the phone, so coverage isn&rsquo;t limited to the southwest Idaho
           starter region. It starts once you&rsquo;re zoomed in about as far as a county (zoom 9);
           farther out nothing loads. Anywhere you&rsquo;ve viewed works offline later. To have a whole
-          state ready before you go, use Downloads → Ready-made (or Pick an area for part of one). Only
+          state ready before you go, use Downloads → State overlays (or Pick an area for part of one). Only
           US land is covered.
         </Text>
       </View>
@@ -198,7 +198,7 @@ export function LayersScreen() {
       ))}
       <Text style={styles.poiSourceNote}>
         From OpenStreetMap (© OpenStreetMap contributors) — not your own pins. Pre-loaded for the
-        southwest Idaho starter region; for other states use Downloads → Ready-made, or Pick an area.
+        southwest Idaho starter region; for other states use Downloads → State overlays, or Pick an area.
       </Text>
 
       <Text style={styles.legendNote}>

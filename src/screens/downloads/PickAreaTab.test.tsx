@@ -67,7 +67,7 @@ jest.mock('../../downloads/freeSpace', () => ({ freeDiskBytes: () => mockFreeByt
 const BOISE: [number, number] = [-116.2, 43.6];
 let renderer: ReactTestRenderer;
 const onViewChange = jest.fn();
-const onSeeReadyMade = jest.fn();
+const onSeeOverlays = jest.fn();
 const reloadCoverage = jest.fn(async () => {});
 const texts = () => renderedTexts(renderer);
 const has = (text: string) => texts().includes(text);
@@ -118,7 +118,7 @@ function mount(coverage: CoverageRow[] = [], zoom = 10, manifest: ManifestState 
           reloadCoverage={reloadCoverage}
           initialView={{ center: BOISE, zoom }}
           onViewChange={onViewChange}
-          onSeeReadyMade={onSeeReadyMade}
+          onSeeOverlays={onSeeOverlays}
         />
       ))
   );
@@ -298,10 +298,10 @@ describe('PickAreaTab: picking squares', () => {
     expect(hasMatch(/^1 square picked · about \d+ km²$/)).toBe(true);
   });
 
-  it('links to Ready-made downloads for whole states', () => {
+  it('links to State overlays for whole states', () => {
     mount();
-    act(() => pressableWith(renderer, 'Ready-made downloads').props.onPress());
-    expect(onSeeReadyMade).toHaveBeenCalled();
+    act(() => pressableWith(renderer, 'State overlays').props.onPress());
+    expect(onSeeOverlays).toHaveBeenCalled();
   });
 
   it('reports the view so the Downloads screen can put the map back where it was', () => {
@@ -659,19 +659,19 @@ describe('PickAreaTab: picking a whole state', () => {
     expect(hasMatch(/besides the whole states — the most at once is 500/)).toBe(true);
   });
 
-  it('says when the state is there in the list because the ready-made pack has its land and trail data', () => {
+  it('says when the state is there in the list because the State overlays pack has its land and trail data', () => {
     mount([], 10, ready([idahoRegion()]));
     openStates();
-    expect(has(`${idahoCells.length} squares · ready-made land & trail data`)).toBe(true);
+    expect(has(`${idahoCells.length} squares · overlay pack ready`)).toBe(true);
   });
 
-  it('downloads the state’s land data from its ready-made pack, map pictures square by square', () => {
+  it('downloads the state’s land data from its State overlays pack, map pictures square by square', () => {
     const region = idahoRegion(['land']);
     mount([], 10, ready([region]));
     openStates();
     act(() => pressableWith(renderer, 'Idaho').props.onPress());
 
-    expect(hasMatch(/installs from the ready-made pack/)).toBe(true);
+    expect(hasMatch(/installs from the state overlay pack/)).toBe(true);
     // A whole state of topo maps is well over a gigabyte, so it asks first.
     let buttons: AlertButton[] | undefined;
     jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, b) => void (buttons = b));
@@ -695,14 +695,14 @@ describe('PickAreaTab: picking a whole state', () => {
     openStates();
     act(() => pressableWith(renderer, 'Idaho').props.onPress());
     expect(hasMatch(/^Whole state: Idaho\.$/)).toBe(true);
-    expect(hasMatch(/installs from the ready-made pack/)).toBe(false);
+    expect(hasMatch(/installs from the state overlay pack/)).toBe(false);
   });
 
   it('waits a moment while the pack list is still loading, then lets it start', () => {
     mount([], 10, { status: 'loading' });
     openStates();
     act(() => pressableWith(renderer, 'Idaho').props.onPress());
-    expect(has('Checking for ready-made state packs…')).toBe(true);
+    expect(has('Checking for state overlay packs…')).toBe(true);
     expect(headerButton().props.disabled).toBe(true);
   });
 
@@ -713,7 +713,7 @@ describe('PickAreaTab: picking a whole state', () => {
     });
     openStates();
     act(() => pressableWith(renderer, 'Idaho').props.onPress());
-    expect(has('Checking for ready-made state packs…')).toBe(false);
+    expect(has('Checking for state overlay packs…')).toBe(false);
   });
 });
 
