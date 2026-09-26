@@ -17,7 +17,7 @@ import {
 } from '../../downloads/blockSelect';
 import { lonLatToCell } from '../../downloads/cells';
 import { US_COVERAGE } from '../../downloads/usCells';
-import { DETAIL_OPTIONS, PACK_OPTIONS, TILE_LAYER_OPTIONS } from '../../downloads/downloadOptions';
+import { DETAIL_OPTIONS, LAYER_LABELS, PACK_OPTIONS, TILE_LAYER_OPTIONS } from '../../downloads/downloadOptions';
 import { estimateDownload, planDownload, tileBytesPerCell } from '../../downloads/downloadPlan';
 import { formatBytes, formatWait } from '../../downloads/formatBytes';
 import { freeDiskBytes } from '../../downloads/freeSpace';
@@ -89,6 +89,8 @@ export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, o
   const [cursor, setCursor] = useState<BlockCursor | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stateSheetOpen, setStateSheetOpen] = useState(false);
+  /** Step 2 (what to save) is folded into a bar under the map and opens over it, so the map never has to shrink. */
+  const [saveOpen, setSaveOpen] = useState(false);
 
   // States whose every square is picked. Their squares don't count toward the cap on hand-picked squares.
   const whole = useMemo(() => {
@@ -246,6 +248,15 @@ export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, o
     );
 
   const nothingChosen = selectedLayers.length === 0 && selectedPackLayers.length === 0;
+  // What the folded step-2 bar says, so the choices are visible without opening it.
+  const saveSummary = (() => {
+    const parts = selectedPackLayers.map((id) => LAYER_LABELS[id] ?? id);
+    if (selectedLayers.length > 0) {
+      const detail = DETAIL_OPTIONS.find((option) => option.zoom === maxZoom)?.label ?? `zoom ${maxZoom}`;
+      parts.push(`${selectedLayers.map((id) => LAYER_LABELS[id] ?? id).join(' + ')} map pictures (${detail})`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : 'Nothing chosen yet';
+  })();
   const blocked = (() => {
     if (selectedCells.length === 0) return 'Tap the map to pick an area first.';
     if (nothingChosen) return 'Choose what to save under step 2.';
@@ -307,183 +318,216 @@ export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, o
 
   return (
     <View style={styles.container}>
-      <View style={styles.mapArea} onLayout={(e) => void (mapSize.current = e.nativeEvent.layout)}>
-        <MapScreenMap
-          // Taps here pick squares — public land must not swallow them by opening its info card.
-          overlayPressEnabled={false}
-          onMapPress={handleMapPress}
-          onViewStateChange={handleView}
-          initialView={initialView}
-          scaleBarBottom={30}
-          cameraRef={cameraRef}
-        >
-          <BlockGridOverlay grid={grid} />
-          <CellsOverlay cells={overlayCells} />
-          <BlockCursorOverlay cursor={cursor} />
-        </MapScreenMap>
+      <View style={styles.main}>
+        <View style={styles.mapArea} onLayout={(e) => void (mapSize.current = e.nativeEvent.layout)}>
+          <MapScreenMap
+            // Taps here pick squares — public land must not swallow them by opening its info card.
+            overlayPressEnabled={false}
+            onMapPress={handleMapPress}
+            onViewStateChange={handleView}
+            initialView={initialView}
+            scaleBarBottom={30}
+            cameraRef={cameraRef}
+          >
+            <BlockGridOverlay grid={grid} />
+            <CellsOverlay cells={overlayCells} />
+            <BlockCursorOverlay cursor={cursor} />
+          </MapScreenMap>
 
-        <View pointerEvents="none" style={styles.crosshair}>
-          <View style={[styles.crossBar, styles.crossAcross]} />
-          <View style={[styles.crossBar, styles.crossDown]} />
-        </View>
-
-        <View pointerEvents="none" style={styles.hintPill}>
-          <Text style={styles.hintPillTitle}>
-            {blockSize === 1 ? 'Each tap picks 1 square' : `Each tap picks ${blockSize} × ${blockSize} squares`}
-          </Text>
-          <Text style={styles.hintPillText}>
-            {blockSize === 1
-              ? 'Zoom out to pick more at once'
-              : blockSize === 16
-                ? 'Zoom in for smaller squares'
-                : 'Zoom out for bigger, in for smaller'}
-          </Text>
-        </View>
-
-        {cursor && cursorPick && (
-          <View pointerEvents="box-none" style={styles.pickBar}>
-            <Pressable
-              style={[
-                styles.pickButton,
-                cursorPick.total === 0 && styles.pickButtonOff,
-                cursorPick.total > 0 && cursorPick.picked === cursorPick.total && styles.pickButtonRemove,
-              ]}
-              onPress={handlePickCenter}
-              disabled={cursorPick.total === 0}
-              accessibilityRole="button"
-            >
-              <Text
-                style={
-                  cursorPick.total > 0 && cursorPick.picked === cursorPick.total
-                    ? styles.pickButtonRemoveText
-                    : styles.pickButtonText
-                }
-              >
-                {pickButtonLabel(cursorPick)}
-              </Text>
-            </Pressable>
+          <View pointerEvents="none" style={styles.crosshair}>
+            <View style={[styles.crossBar, styles.crossAcross]} />
+            <View style={[styles.crossBar, styles.crossDown]} />
           </View>
-        )}
 
-        <View style={styles.mapButtons}>
-          <Pressable style={styles.mapButton} onPress={handleSelectView} accessibilityRole="button">
-            <Text style={styles.mapButtonText}>Pick everything in view</Text>
-          </Pressable>
-          {selectedCells.length > 0 && (
-            <Pressable
-              style={styles.mapButton}
-              onPress={() => {
-                clearSelection();
-                setNotice(null);
-              }}
-              accessibilityRole="button"
-            >
-              <Text style={styles.mapButtonText}>Clear</Text>
-            </Pressable>
-          )}
-        </View>
-      </View>
-
-      <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
-        <Text style={styles.stepTitle}>1 · Pick the area</Text>
-        {selectedCells.length === 0 ? (
-          <Text style={styles.body}>
-            Tap the map to pick squares (each is about {units === 'imperial' ? '18 miles' : '30 km'} across), or pan
-            until the + is over one and press the Pick button. Zoom out first to pick a whole region in a few taps. Only
-            need land and trail data for a whole state? Try{' '}
-            <Text style={styles.link} onPress={onSeeReadyMade}>
-              Ready-made downloads
+          <View pointerEvents="none" style={styles.hintPill}>
+            <Text style={styles.hintPillTitle}>
+              {blockSize === 1 ? 'Each tap picks 1 square' : `Each tap picks ${blockSize} × ${blockSize} squares`}
             </Text>
-            .
-          </Text>
-        ) : (
-          <Text style={styles.selection}>
-            {selectedCells.length} square{selectedCells.length === 1 ? '' : 's'} picked · about{' '}
-            {formatArea(areaKm2, units)}
-          </Text>
-        )}
-        <Pressable style={styles.stateButton} onPress={() => setStateSheetOpen(true)} accessibilityRole="button">
-          <Text style={styles.stateButtonText}>Pick a whole state…</Text>
-        </Pressable>
-        {whole.states.length > 0 && (
-          <Text style={styles.body}>
-            Whole state{whole.states.length === 1 ? '' : 's'}: {whole.states.map((state) => state.name).join(', ')}.
-            {plan.jobs.some((job) => job.kind === 'region')
-              ? ' Land and trail data installs from the ready-made pack, so it is quick; map pictures are saved square by square.'
-              : ''}
-          </Text>
-        )}
-        {notice && <Text style={styles.warning}>{notice}</Text>}
-        <View style={styles.legend}>
-          <LegendDot color={CELL_STATE_COLORS.selected} label="Picked" />
-          <LegendDot color={CELL_STATE_COLORS.complete} label="On your phone" />
-          <LegendDot color={CELL_STATE_COLORS.partial} label="Partly on your phone" />
-        </View>
+            <Text style={styles.hintPillText}>
+              {blockSize === 1
+                ? 'Zoom out to pick more at once'
+                : blockSize === 16
+                  ? 'Zoom in for smaller squares'
+                  : 'Zoom out for bigger, in for smaller'}
+            </Text>
+          </View>
 
-        <Text style={styles.stepTitle}>2 · Choose what to save</Text>
-
-        <Text style={styles.groupTitle}>Land &amp; trail data</Text>
-        <Text style={styles.body}>
-          Small files, so a big area is fine. This also loads by itself as you browse the main map online — download it
-          here to have it offline before you leave.
-        </Text>
-        {PACK_OPTIONS.map((option) => {
-          const active = selectedPackLayers.includes(option.id);
-          return (
-            <Pressable
-              key={option.id}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: active }}
-              style={[styles.option, active && styles.optionActive]}
-              onPress={() => togglePack(option.id)}
-            >
-              <View style={[styles.checkbox, active && styles.checkboxActive]}>
-                {active && <Text style={styles.checkboxTick}>✓</Text>}
-              </View>
-              <View style={styles.optionText}>
-                <Text style={styles.optionLabel}>{option.label}</Text>
-                <Text style={styles.optionNote}>
-                  {option.note} · about {formatBytes(option.estimateBytes)} per square
+          {cursor && cursorPick && (
+            <View pointerEvents="box-none" style={styles.pickBar}>
+              <Pressable
+                style={[
+                  styles.pickButton,
+                  cursorPick.total === 0 && styles.pickButtonOff,
+                  cursorPick.total > 0 && cursorPick.picked === cursorPick.total && styles.pickButtonRemove,
+                ]}
+                onPress={handlePickCenter}
+                disabled={cursorPick.total === 0}
+                accessibilityRole="button"
+              >
+                <Text
+                  style={
+                    cursorPick.total > 0 && cursorPick.picked === cursorPick.total
+                      ? styles.pickButtonRemoveText
+                      : styles.pickButtonText
+                  }
+                >
+                  {pickButtonLabel(cursorPick)}
                 </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-
-        <Text style={styles.groupTitle}>Offline map pictures</Text>
-        <Text style={styles.body}>
-          Lets the base map work with no signal. These are large — Maximum detail can be around 100 MB for every square.
-        </Text>
-        <View style={styles.chipRow}>
-          {TILE_LAYER_OPTIONS.map((layer) => (
-            <Chip
-              key={layer.id}
-              label={layer.label}
-              active={selectedLayers.includes(layer.id)}
-              onPress={() => toggleTile(layer.id)}
-            />
-          ))}
-        </View>
-        {selectedLayers.length > 0 && (
-          <>
-            <Text style={styles.subLabel}>Detail</Text>
-            <View style={styles.chipRow}>
-              {DETAIL_OPTIONS.map((detail) => (
-                <Chip
-                  key={detail.zoom}
-                  label={detail.label}
-                  active={maxZoom === detail.zoom}
-                  onPress={() => setMaxZoom(detail.zoom)}
-                />
-              ))}
+              </Pressable>
             </View>
-            <Text style={styles.optionNote}>
-              About {formatBytes(selectedLayers.reduce((sum, layer) => sum + tileBytesPerCell(layer, maxZoom), 0))} per
-              square for what you picked, at zoom {maxZoom}.
-            </Text>
+          )}
+
+          <View style={styles.mapButtons}>
+            <Pressable style={styles.mapButton} onPress={handleSelectView} accessibilityRole="button">
+              <Text style={styles.mapButtonText}>Pick everything in view</Text>
+            </Pressable>
+            {selectedCells.length > 0 && (
+              <Pressable
+                style={styles.mapButton}
+                onPress={() => {
+                  clearSelection();
+                  setNotice(null);
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.mapButtonText}>Clear</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+
+        <View style={styles.panel}>
+          <ScrollView style={styles.panelScroll} contentContainerStyle={styles.panelContent}>
+            <Text style={styles.stepTitle}>1 · Pick the area</Text>
+            {selectedCells.length === 0 ? (
+              <Text style={styles.body}>
+                Tap the map to pick squares (each is about {units === 'imperial' ? '18 miles' : '30 km'} across), or pan
+                until the + is over one and press the Pick button. Zoom out first to pick a whole region in a few taps.
+                Only need land and trail data for a whole state? Try{' '}
+                <Text style={styles.link} onPress={onSeeReadyMade}>
+                  Ready-made downloads
+                </Text>
+                .
+              </Text>
+            ) : (
+              <Text style={styles.selection}>
+                {selectedCells.length} square{selectedCells.length === 1 ? '' : 's'} picked · about{' '}
+                {formatArea(areaKm2, units)}
+              </Text>
+            )}
+            <Pressable style={styles.stateButton} onPress={() => setStateSheetOpen(true)} accessibilityRole="button">
+              <Text style={styles.stateButtonText}>Pick a whole state…</Text>
+            </Pressable>
+            {whole.states.length > 0 && (
+              <Text style={styles.body}>
+                Whole state{whole.states.length === 1 ? '' : 's'}: {whole.states.map((state) => state.name).join(', ')}.
+                {plan.jobs.some((job) => job.kind === 'region')
+                  ? ' Land and trail data installs from the ready-made pack, so it is quick; map pictures are saved square by square.'
+                  : ''}
+              </Text>
+            )}
+            {notice && <Text style={styles.warning}>{notice}</Text>}
+            <View style={styles.legend}>
+              <LegendDot color={CELL_STATE_COLORS.selected} label="Picked" />
+              <LegendDot color={CELL_STATE_COLORS.complete} label="On your phone" />
+              <LegendDot color={CELL_STATE_COLORS.partial} label="Partly on your phone" />
+            </View>
+          </ScrollView>
+
+          <Pressable style={styles.saveBar} onPress={() => setSaveOpen(true)} accessibilityRole="button">
+            <View style={styles.saveBarText}>
+              <Text style={styles.saveBarTitle}>2 · Choose what to save</Text>
+              <Text style={styles.saveBarSummary} numberOfLines={2}>
+                {saveSummary}
+              </Text>
+            </View>
+            <Text style={styles.saveBarAction}>Change ▲</Text>
+          </Pressable>
+        </View>
+
+        {saveOpen && (
+          <>
+            <Pressable
+              style={styles.backdrop}
+              onPress={() => setSaveOpen(false)}
+              accessibilityLabel="Close the save options"
+            />
+            <View style={styles.sheet}>
+              <View style={styles.sheetHeader}>
+                <Text style={styles.sheetTitle}>2 · Choose what to save</Text>
+                <Pressable onPress={() => setSaveOpen(false)} hitSlop={10} accessibilityRole="button">
+                  <Text style={styles.sheetDone}>Done ▼</Text>
+                </Pressable>
+              </View>
+              <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent}>
+                <Text style={styles.groupTitle}>Land &amp; trail data</Text>
+                <Text style={styles.body}>
+                  Small files, so a big area is fine. This also loads by itself as you browse the main map online —
+                  download it here to have it offline before you leave.
+                </Text>
+                {PACK_OPTIONS.map((option) => {
+                  const active = selectedPackLayers.includes(option.id);
+                  return (
+                    <Pressable
+                      key={option.id}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: active }}
+                      style={[styles.option, active && styles.optionActive]}
+                      onPress={() => togglePack(option.id)}
+                    >
+                      <View style={[styles.checkbox, active && styles.checkboxActive]}>
+                        {active && <Text style={styles.checkboxTick}>✓</Text>}
+                      </View>
+                      <View style={styles.optionText}>
+                        <Text style={styles.optionLabel}>{option.label}</Text>
+                        <Text style={styles.optionNote}>
+                          {option.note} · about {formatBytes(option.estimateBytes)} per square
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+
+                <Text style={styles.groupTitle}>Offline map pictures</Text>
+                <Text style={styles.body}>
+                  Lets the base map work with no signal. These are large — Maximum detail can be around 100 MB for every
+                  square.
+                </Text>
+                <View style={styles.chipRow}>
+                  {TILE_LAYER_OPTIONS.map((layer) => (
+                    <Chip
+                      key={layer.id}
+                      label={layer.label}
+                      active={selectedLayers.includes(layer.id)}
+                      onPress={() => toggleTile(layer.id)}
+                    />
+                  ))}
+                </View>
+                {selectedLayers.length > 0 && (
+                  <>
+                    <Text style={styles.subLabel}>Detail</Text>
+                    <View style={styles.chipRow}>
+                      {DETAIL_OPTIONS.map((detail) => (
+                        <Chip
+                          key={detail.zoom}
+                          label={detail.label}
+                          active={maxZoom === detail.zoom}
+                          onPress={() => setMaxZoom(detail.zoom)}
+                        />
+                      ))}
+                    </View>
+                    <Text style={styles.optionNote}>
+                      About{' '}
+                      {formatBytes(selectedLayers.reduce((sum, layer) => sum + tileBytesPerCell(layer, maxZoom), 0))}{' '}
+                      per square for what you picked, at zoom {maxZoom}.
+                    </Text>
+                  </>
+                )}
+              </ScrollView>
+            </View>
           </>
         )}
-      </ScrollView>
+      </View>
 
       <StatePickerSheet
         visible={stateSheetOpen}
@@ -541,6 +585,8 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
+    // Map above, the step-1 panel below; step 2 opens over both (absolute), so neither changes size.
+    main: { flex: 1 },
     mapArea: { flex: 4 },
     hintPill: {
       position: 'absolute',
@@ -596,7 +642,53 @@ const makeStyles = (c: ThemeColors) =>
     },
     mapButtonText: { fontSize: 13, fontWeight: '600' },
     panel: { flex: 5 },
+    panelScroll: { flex: 1 },
     panelContent: { padding: 16, gap: 8 },
+    saveBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginHorizontal: 12,
+      marginBottom: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      borderRadius: 12,
+      backgroundColor: c.primaryTint,
+    },
+    saveBarText: { flex: 1 },
+    saveBarTitle: { fontSize: 15, fontWeight: '700' },
+    saveBarSummary: { fontSize: 12, color: c.textSecondary, marginTop: 2 },
+    saveBarAction: { color: c.primaryText, fontWeight: '700', fontSize: 13 },
+    backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: c.scrim },
+    sheet: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      top: '16%',
+      backgroundColor: c.surface,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      overflow: 'hidden',
+      elevation: 8,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: -2 },
+    },
+    sheetHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    sheetTitle: { flex: 1, fontSize: 16, fontWeight: '700' },
+    sheetDone: { color: c.primaryText, fontWeight: '700', fontSize: 14 },
+    sheetScroll: { flex: 1 },
+    sheetContent: { padding: 16, gap: 8, paddingBottom: 24 },
     stepTitle: { fontSize: 16, fontWeight: '700', marginTop: 6 },
     groupTitle: { fontSize: 14, fontWeight: '700', marginTop: 6 },
     subLabel: { fontSize: 12, fontWeight: '600', color: c.textMuted, marginTop: 4, textTransform: 'uppercase' },

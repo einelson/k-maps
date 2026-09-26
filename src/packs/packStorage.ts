@@ -29,6 +29,16 @@ export function packCellUri(layer: PackLayerId, cx: number, cy: number): string 
   return cellFile(layer, cx, cy).uri;
 }
 
+/** A cell's saved JSON text, or null when the file is missing or unreadable. */
+export async function readPackCellText(layer: PackLayerId, cx: number, cy: number): Promise<string | null> {
+  try {
+    const file = cellFile(layer, cx, cy);
+    return file.exists ? await file.text() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Writes (or replaces) a cell's pack, creating directories as needed. Returns the file size in bytes. */
 export function writePackCell(
   layer: PackLayerId,

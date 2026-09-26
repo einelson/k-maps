@@ -6,6 +6,7 @@ import type { FeatureCollection } from 'geojson';
 
 import { listCoverage } from '../downloads/coverageRepo';
 import { isCellBundled } from '../packs/region';
+import { OVERVIEW_LEVELS, type OverviewLevel } from './landOverview';
 import { packCellUri } from '../packs/packStorage';
 import { PACK_LAYER_IDS, type PackLayerId } from '../packs/types';
 import { usePackStore } from '../state/usePackStore';
@@ -117,6 +118,60 @@ export function LandLayers({
         filter={f(['all', ['==', ['get', 'kind'], 'outline'], ['==', ['get', 'Pub_Access'], 'RA']])}
         layout={{ visibility: landVis }}
         paint={{ 'line-color': PUB_ACCESS_COLORS.RA, 'line-width': 1.5, 'line-dasharray': [2, 2] }}
+      />
+    </GeoJSONSource>
+  );
+}
+
+interface LandOverviewLayersProps {
+  id: string;
+  /** One block's thinned land fills (src/map/landOverview.ts) for `level`. */
+  data: string;
+  level: OverviewLevel;
+  landVisible: boolean;
+  landOpacity: number;
+  privateVisible: boolean;
+  privateOpacity: number;
+}
+
+/**
+ * Zoomed-out land: just the public and likely-private fills of a whole block of downloaded cells, in one source. It is
+ * only drawn inside its level's zoom range; from zoom 9 the per-cell `LandLayers` (with outlines, and tappable) take over.
+ * Not tappable — the thinned shapes carry no unit names.
+ */
+export function LandOverviewLayers({
+  id,
+  data,
+  level,
+  landVisible,
+  landOpacity,
+  privateVisible,
+  privateOpacity,
+}: LandOverviewLayersProps) {
+  const { minZoom, maxZoom } = OVERVIEW_LEVELS[level];
+  return (
+    <GeoJSONSource id={id} data={data}>
+      <Layer
+        id={`${id}-private-fill`}
+        type="fill"
+        source={id}
+        beforeId={PACK_ANCHORS.land}
+        minzoom={minZoom}
+        maxzoom={maxZoom}
+        filter={kindIs('private')}
+        layout={{ visibility: privateVisible ? 'visible' : 'none' }}
+        paint={{ 'fill-color': LIKELY_PRIVATE_COLOR, 'fill-opacity': 0.3 * privateOpacity }}
+      />
+      <Layer
+        id={`${id}-public-fill`}
+        type="fill"
+        source={id}
+        beforeId={PACK_ANCHORS.land}
+        minzoom={minZoom}
+        maxzoom={maxZoom}
+        filter={kindIs('public')}
+        layout={{ visibility: landVisible ? 'visible' : 'none' }}
+        paint={{ 'fill-color': LAND_FILL_COLOR_EXPRESSION, 'fill-opacity': landOpacity }}
       />
     </GeoJSONSource>
   );
@@ -380,6 +435,8 @@ export interface PackCell {
   cx: number;
   cy: number;
   uri: string;
+  /** When the cell was last written (epoch ms) — tells the land overview its file is out of date. */
+  updatedAt: number;
 }
 
 /**
@@ -402,7 +459,13 @@ export function usePackCells(): PackCell[] {
           const layer = row.layer as PackLayerId;
           if (!PACK_LAYER_IDS.includes(layer)) continue;
           if (row.status !== 'complete' || isCellBundled(layer, row.cell_x, row.cell_y)) continue;
-          next.push({ layer, cx: row.cell_x, cy: row.cell_y, uri: packCellUri(layer, row.cell_x, row.cell_y) });
+          next.push({
+            layer,
+            cx: row.cell_x,
+            cy: row.cell_y,
+            uri: packCellUri(layer, row.cell_x, row.cell_y),
+            updatedAt: row.updated_at,
+          });
         }
         setCells(next);
       })

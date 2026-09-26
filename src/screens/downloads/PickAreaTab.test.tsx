@@ -312,11 +312,45 @@ describe('PickAreaTab: picking squares', () => {
 });
 
 describe('PickAreaTab: choosing what to save', () => {
+  const openOptions = () => act(() => pressableWith(renderer, '2 · Choose what to save').props.onPress());
+
+  it('folds the options into a bar under the map, which says what is chosen without opening it', () => {
+    mount();
+
+    expect(has('2 · Choose what to save')).toBe(true);
+    expect(has('Public land + private shading · Topo map pictures (Maximum)')).toBe(true);
+    // Not opened: none of the option rows are on screen.
+    expect(has('Forest roads (MVUM)')).toBe(false);
+    expect(has('Satellite')).toBe(false);
+  });
+
+  it('opens the options over the map, and Done folds them away again', () => {
+    mount();
+    openOptions();
+    expect(has('Forest roads (MVUM)')).toBe(true);
+    expect(has('Satellite')).toBe(true);
+    expect(has('Done ▼')).toBe(true);
+
+    act(() => pressableWith(renderer, 'Done').props.onPress());
+    expect(has('Forest roads (MVUM)')).toBe(false);
+  });
+
+  it('tapping the dimmed area outside the sheet closes it too', () => {
+    mount();
+    openOptions();
+    const backdrop = renderer.root.find(
+      (n) => n.props.accessibilityLabel === 'Close the save options' && typeof n.props.onPress === 'function'
+    );
+    act(() => backdrop.props.onPress());
+    expect(has('Forest roads (MVUM)')).toBe(false);
+  });
+
   it('starts with public land and topo maps chosen, and remembers changes in the download options', () => {
     mount();
     expect(store.getState().selectedPackLayers).toEqual(['land']);
     expect(store.getState().selectedLayers).toEqual(['topo']);
 
+    openOptions();
     act(() => pressableWith(renderer, 'Forest roads (MVUM)').props.onPress());
     act(() => pressableWith(renderer, 'Satellite').props.onPress());
     act(() => pressableWith(renderer, 'Public land + private shading').props.onPress());
@@ -325,8 +359,29 @@ describe('PickAreaTab: choosing what to save', () => {
     expect(store.getState().selectedLayers).toEqual(['topo', 'satellite']);
   });
 
+  it('keeps the folded bar up to date as choices change', () => {
+    mount();
+    openOptions();
+    act(() => pressableWith(renderer, 'Forest roads (MVUM)').props.onPress());
+    act(() => pressableWith(renderer, 'Satellite').props.onPress());
+    act(() => pressableWith(renderer, 'Standard').props.onPress());
+
+    expect(has('Public land + private shading · Forest roads (MVUM) · Topo + Satellite map pictures (Standard)')).toBe(
+      true
+    );
+  });
+
+  it('says nothing is chosen when nothing is', () => {
+    mount();
+    act(() => {
+      store.setState({ selectedLayers: [], selectedPackLayers: [] });
+    });
+    expect(has('Nothing chosen yet')).toBe(true);
+  });
+
   it('offers detail levels only once a map picture is chosen, and shows their cost per square', () => {
     mount();
+    openOptions();
     expect(has('Detail')).toBe(true);
     expect(hasMatch(/About .* per square for what you picked, at zoom 16/)).toBe(true);
 
@@ -336,6 +391,13 @@ describe('PickAreaTab: choosing what to save', () => {
 
     act(() => pressableWith(renderer, 'Topo').props.onPress());
     expect(has('Detail')).toBe(false);
+  });
+
+  it('the total stays on screen while the options are open, so each change shows its cost', () => {
+    mount();
+    tap();
+    openOptions();
+    expect(hasMatch(/^About .* · .* for land & trail data$/)).toBe(true);
   });
 });
 

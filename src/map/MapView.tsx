@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import {
   Camera,
@@ -50,6 +50,7 @@ import { LiveRasterLayers } from './LiveRasterLayers';
 import { PinImages } from './PinLayers';
 import {
   LandLayers,
+  LandOverviewLayers,
   MvumLayers,
   OsmLayers,
   PACK_ANCHORS,
@@ -59,6 +60,7 @@ import {
   usePackCells,
 } from './PackLayers';
 import { pickWindowCells } from './cellWindow';
+import { useLandOverview } from './useLandOverview';
 import { TRAIL_CLASS_LABELS } from './trailsSource';
 import { useAutoPackLoader } from './useAutoPackLoader';
 import { useCellWindow } from './useCellWindow';
@@ -232,6 +234,11 @@ export function MapScreenMap({
   // and every mounted cell is a source plus several style layers.
   const { cellWindow, viewBox, updateCellWindow } = useCellWindow();
   const mountedPackCells = useMemo(() => pickWindowCells(packCells, cellWindow), [packCells, cellWindow]);
+  // Below zoom 9 downloaded cells aren't mounted, so the land layer draws a thinned overview of them instead
+  // (landOverview.ts) — otherwise a downloaded state would only show once zoomed in.
+  const landCells = useMemo(() => packCells.filter((cell) => cell.layer === 'land'), [packCells]);
+  const landOverview = useLandOverview({ enabled: landVisible || privateVisible, cells: landCells });
+  const landOverviewUpdateView = landOverview.updateView;
   // Hunting units are downloaded per state (Downloads -> Hunting units) and mount only when the layer is on and
   // their area is in view (each is a source plus layers, and all fifty can be downloaded).
   const huntVisible = useLayersStore((s) => s.overlayVisibility.huntUnits);
@@ -281,9 +288,19 @@ export function MapScreenMap({
   // hundreds of cells), so without a word about it the layer just looks like it only exists around Boise, where the
   // bundled starter data does draw at any zoom.
   const [zoomedOutOfData, setZoomedOutOfData] = useState(false);
+  // Downloaded land draws at any zoom now (the overview), so only say "zoom in" where there is nothing downloaded.
+  const downloadedLand = useRef(new Set<string>());
+  useEffect(() => {
+    downloadedLand.current = new Set(landCells.map((cell) => `${cell.cx}:${cell.cy}`));
+  }, [landCells]);
   const updateZoomHint = useCallback((view: ViewState) => {
     const { cx, cy } = lonLatToCell(view.center[0], view.center[1]);
-    setZoomedOutOfData(view.zoom < AUTO_LOAD_MIN_ZOOM && US_COVERAGE.hasLand(cx, cy) && !isCellBundled('land', cx, cy));
+    setZoomedOutOfData(
+      view.zoom < AUTO_LOAD_MIN_ZOOM &&
+        US_COVERAGE.hasLand(cx, cy) &&
+        !isCellBundled('land', cx, cy) &&
+        !downloadedLand.current.has(`${cx}:${cy}`)
+    );
   }, []);
 
   // A card left open would be stale (and unreachable) once taps stop opening cards, so drop it
@@ -454,6 +471,7 @@ export function MapScreenMap({
             ?.getViewState()
             .then((view) => {
               updateCellWindow(view);
+              landOverviewUpdateView(view);
               updateZoomHint(view);
               onViewStateChange?.(view);
             })
@@ -461,6 +479,7 @@ export function MapScreenMap({
         }}
         onRegionDidChange={(event) => {
           updateCellWindow(event.nativeEvent);
+          landOverviewUpdateView(event.nativeEvent);
           updateZoomHint(event.nativeEvent);
           onAutoLoadView(event.nativeEvent);
           onViewStateChange?.(event.nativeEvent);
@@ -544,6 +563,18 @@ export function MapScreenMap({
               onPress={overlayPressEnabled ? handleLandPress : undefined}
             />
           ))}
+        {landOverview.blocks.map((block) => (
+          <LandOverviewLayers
+            key={block.id}
+            id={block.id}
+            data={block.uri}
+            level={block.level}
+            landVisible={landVisible}
+            landOpacity={landOpacity}
+            privateVisible={privateVisible}
+            privateOpacity={privateOpacity}
+          />
+        ))}
 
         <GeoJSONSource
           id="blm-sma"
@@ -661,7 +692,10 @@ export function MapScreenMap({
         <Text style={styles.attributionText}>{mapAttribution(overlayVisibility)}</Text>
       </View>
 
-      <AutoLoadPill zoomHint={zoomedOutOfData && autoLoad && autoLoadSetting && wantedPacks.length > 0} />
+      <AutoLoadPill
+        zoomHint={zoomedOutOfData && autoLoad && autoLoadSetting && wantedPacks.length > 0}
+        preparing={landOverview.building}
+      />
 
       {selected?.kind === 'poi' && (
         <View style={styles.card}>
@@ -872,7 +906,7 @@ function InfoCard({ eyebrow, title, rows, actions = [], source, dotColor, onClos
  * Small status chip over the map about the land / forest-road / trail data: loading it, unable to load it, or too far
  * zoomed out to show it. Anything that would otherwise make a missing layer look like a bug says so here instead.
  */
-function AutoLoadPill({ zoomHint }: { zoomHint: boolean }) {
+function AutoLoadPill({ zoomHint, preparing }: { zoomHint: boolean; preparing: boolean }) {
   const styles = useThemedStyles(makeStyles);
   const pending = useAutoLoadStore((s) => s.pending);
   const active = useAutoLoadStore((s) => s.active);
@@ -881,6 +915,8 @@ function AutoLoadPill({ zoomHint }: { zoomHint: boolean }) {
   if (active) {
     const remaining = pending + 1;
     text = `Loading map data… ${remaining} ${remaining === 1 ? 'area' : 'areas'} left`;
+  } else if (preparing) {
+    text = 'Preparing the zoomed-out land view…';
   } else if (zoomHint) {
     text = 'Zoom in to see land data here';
   } else if (paused) {

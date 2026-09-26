@@ -44,8 +44,8 @@ token they rely on; what's untested is how they look and behave on the phone.
   are switched on) and keeps them on the device, so anywhere you've looked works offline later. After two
   failures in a row it assumes there's no signal and pauses for two minutes; a failed cell isn't retried
   for five. A chip at the top of the map says what's going on: "Loading map data…", "Zoom in to see land
-  data here" (below zoom 9, outside the bundled region — otherwise the layer just looks like it only
-  exists around Boise) or "Couldn't load land data" (after those failures). Switch it off with Layers →
+  data here" (below zoom 9, outside the bundled region and with nothing downloaded at the middle of the view — otherwise
+  the layer just looks like it only exists around Boise), or "Preparing the zoomed-out land view…" while overview blocks are made or "Couldn't load land data" (after those failures). Switch it off with Layers →
   *Load land data as I pan*. OSM and POI stay manual — the free Overpass servers are too slow to fetch
   behind your back. How big is "everywhere"? Measured: Idaho's 329 cells are 60 MB of land data on the
   phone (184 KB a cell on average, 1.3 MB at most) and a 15 MB download, and the app's own fetcher takes
@@ -57,6 +57,8 @@ token they rely on; what's untested is how they look and behave on the phone.
   that always shows the total, and the Download button at the right end of the header), *Ready-made* (a state's land
   and trail data, and hunting units — the hunting-units list starts folded, with the states already on the phone first)
   and *On this phone* (what's stored **split by state**, free space, delete overlay data a state or a layer at a time).
+  Under the map, *2 · Choose what to save* is a folded bar that summarises the choices; tapping it opens the options in
+  a sheet over the map (the map itself never resizes), with the running total still visible beneath.
   A tap on the map picks a **block of squares sized to the zoom** — 1 square from about zoom 7 in, then 2×2, 4×4, 8×8,
   16×16 as you zoom out — always 70–140 dp (a comfortable fingertip) on screen; the grid it picks from is drawn on the
   map, tapping a picked block again puts it back, and *Pick everything in view* picks the whole screen (at most 500
@@ -106,6 +108,16 @@ token they rely on; what's untested is how they look and behave on the phone.
   layers, so a state's worth can't all be mounted at once. The map mounts the cells in view plus one
   cell around them (at most 30 per layer) from zoom 9 in (`src/map/cellWindow.ts`); the bundled
   starter data is one source and always draws
+- **Downloaded land shows at any zoom.** Below zoom 9 those cells aren't mounted, so a downloaded state used to
+  vanish when zoomed out (only the bundled Boise data drew). The public-land and likely-private fills now have a
+  zoomed-out *overview* (`src/map/landOverview.ts`): the fills of every downloaded cell in an 8×8 block, boiled down to
+  what the fills need and snapped to a lattice aligned to the cell edges (so borders shared by two polygons — or two
+  cells — stay shared, no gaps), joined into one small file per block. Two levels: *coarse* for state-sized views (zoom
+  5–7.5, ~5 KB a cell) and *fine* for county-sized ones (7.5–9, ~24 KB a cell), at most 24 / 12 blocks mounted. Built
+  on the phone from cells it already has (`landOverviewBuild.ts`, `useLandOverview.ts`), cached in
+  `<documents>/packs/land-overview/`, rebuilt when a block's cells change and tidied away when its cells are deleted.
+  Fills only — no outlines, and not tappable; from zoom 9 the detailed cells draw. Below zoom 5 nothing is drawn. Roads,
+  trails, OSM and POI stay zoom-9-and-in (their layers have their own minimum zooms; a state of them is gigabytes)
 - **Layers are sorted into groups** — *Land & access*, *Roads & trails*, *Water & terrain*,
   *Hazards & conditions* — in both the map's quick dropdown (groups fold away; one opens with any
   layer that's on and shows an "N on" badge) and the full Layers screen (legends, opacity,
