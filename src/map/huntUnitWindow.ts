@@ -1,7 +1,7 @@
 /**
  * Which downloaded states' hunting units the map mounts. Each mounted state is a MapLibre source plus three style
  * layers, and a hunter can download all fifty — so only states whose area overlaps the current view are mounted,
- * nearest the center first, capped. (Idaho, bundled, is always mounted by the caller.)
+ * nearest the center first, capped.
  *
  * The view is quantized to half-degree steps, so panning within a step changes nothing and doesn't re-render the map.
  * Pure so it is unit-testable.

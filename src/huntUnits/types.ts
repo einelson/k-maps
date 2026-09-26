@@ -67,7 +67,7 @@ export interface HuntStateConfig {
   sets: HuntSetConfig[];
 }
 
-/** What the app knows about one state's hunting units — from the manifest at install time, or (Idaho) from the bundled copy. */
+/** What the app knows about one state's hunting units — from the manifest at install time. */
 export interface HuntStateInfo {
   /** Two-letter postal code. */
   state: string;

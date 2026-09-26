@@ -18,6 +18,7 @@ import type { PolygonGeometry } from './clip.ts';
 import { computeLikelyPrivate } from './likelyPrivate.ts';
 import type { Bounds, PackContext, PackFeature, PackFeatureCollection } from './types.ts';
 import { throwIfAborted } from './http.ts';
+import { emptyCollection, usEdgeLand, usRestriction } from './usFilter.ts';
 
 export const LAND_FEDERAL_SERVICE_URL =
   'https://geo.dot.gov/server/rest/services/FLMA/PADUS/MapServer';
@@ -133,6 +134,10 @@ export async function fetchLandPack(
   options: LandPackOptions = {}
 ): Promise<LandFeatureCollection> {
   const { signal } = ctx;
+  if (usRestriction(bounds, ctx.us).skip) {
+    ctx.onProgress?.(1);
+    return emptyCollection(); // no US land in this cell: nothing to draw, nothing to fetch
+  }
   const envelope = envelopeOf(bounds);
   const progress: Progress = {
     step: 0,
@@ -195,7 +200,7 @@ export async function fetchLandPack(
     const priv = await computeLikelyPrivate(
       bounds,
       publicFeatures.map((f) => f.geometry as PolygonGeometry),
-      { signal }
+      { signal, land: usEdgeLand(bounds, ctx.us) }
     );
     for (const geometry of priv) {
       features.push({ type: 'Feature', properties: { kind: 'private' }, geometry });

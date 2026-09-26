@@ -1,6 +1,8 @@
 /**
  * "Likely private (inferred)" layer (spec §6.4): the cell rectangle minus the
- * union of every public-land polygon.
+ * union of every public-land polygon. In a cell that is only partly US (coast,
+ * Canada, Mexico) the start is the US part of the cell instead of its whole
+ * rectangle, so nothing is inferred for the ocean or another country.
  *
  * polyclip-ts (behind turf `difference`) is slow for hundreds of overlapping
  * polygons — ~0.6 s in V8 for a city cell, and Hermes is 5-10x slower — so
@@ -30,6 +32,8 @@ const PRIVATE_COORD_DECIMALS = 6;
 
 export interface LikelyPrivateOptions {
   signal?: AbortSignal;
+  /** Limits the result to this land (the US part of a coast or border cell); left out, the whole cell counts. */
+  land?: PolygonGeometry;
   /** Split a region while its clipped polygons have more vertices than this. */
   maxLeafVertices?: number;
   maxDepth?: number;
@@ -79,9 +83,11 @@ function feature(geometry: Polygon): Feature<Polygon> {
   return { type: 'Feature', properties: {}, geometry };
 }
 
-/** rect - polys, tolerating an occasional geometry polyclip rejects. */
-function subtract(rect: Bounds, polys: PolygonGeometry[]): (Polygon | MultiPolygon)[] {
-  const rectFeature = feature(boundsToPolygon(rect));
+/** (`land`, else the rectangle) - polys, tolerating an occasional geometry polyclip rejects. */
+function subtract(rect: Bounds, polys: PolygonGeometry[], land?: PolygonGeometry): (Polygon | MultiPolygon)[] {
+  const rectFeature: Feature<Polygon | MultiPolygon> = land
+    ? { type: 'Feature', properties: {}, geometry: land }
+    : feature(boundsToPolygon(rect));
   const run = (subject: Feature<Polygon | MultiPolygon>, clips: PolygonGeometry[]) =>
     difference(
       featureCollection([subject, ...clips.map((g) => ({ type: 'Feature' as const, properties: {}, geometry: g }))])
@@ -154,11 +160,18 @@ export async function computeLikelyPrivate(
     }
   };
 
-  async function solve(region: Bounds, items: Item[], depth: number): Promise<void> {
+  // `land` is the part of `region` that counts: undefined = all of it, null = none of it (nothing to infer there).
+  async function solve(
+    region: Bounds,
+    items: Item[],
+    depth: number,
+    land: PolygonGeometry | null | undefined
+  ): Promise<void> {
     throwIfAborted(signal);
+    if (land === null) return;
     const vertices = items.reduce((sum, item) => sum + item.vertices, 0);
     if (items.length === 0 || vertices <= maxLeafVertices || depth >= maxDepth) {
-      for (const g of subtract(region, items.map((i) => i.geometry))) collected.push(g);
+      for (const g of subtract(region, items.map((i) => i.geometry), land)) collected.push(g);
       await maybeYield();
       return;
     }
@@ -178,7 +191,7 @@ export async function computeLikelyPrivate(
         const clipped = clipPolygonGeometry(item.geometry, quadrant);
         if (clipped) childItems.push(toItem(clipped));
       }
-      await solve(quadrant, childItems, depth + 1);
+      await solve(quadrant, childItems, depth + 1, land === undefined ? undefined : clipPolygonGeometry(land, quadrant));
     }
   }
 
@@ -187,7 +200,8 @@ export async function computeLikelyPrivate(
     const clipped = clipPolygonGeometry(g, bounds);
     if (clipped) items.push(toItem(clipped));
   }
-  await solve(bounds, items, 0);
+  const land = options.land ? clipPolygonGeometry(options.land, bounds) : undefined;
+  await solve(bounds, items, 0, land);
 
   const out: Polygon[] = [];
   for (const g of collected) {

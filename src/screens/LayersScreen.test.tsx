@@ -12,6 +12,8 @@ jest.mock('expo-sqlite/kv-store', () => ({
   __esModule: true,
   default: { getItemSync: () => null, setItemSync: () => undefined, removeItemSync: () => undefined },
 }));
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 // The wildfire store's on-device cache needs the native file system.
 jest.mock('../packs/wildfireCache', () => ({ readWildfireSnapshot: jest.fn(async () => null), writeWildfireSnapshot: jest.fn() }));
@@ -40,6 +42,7 @@ function texts(): string[] {
 const on = (id: (typeof OVERLAYS)[number]['id']) => act(() => useLayersStore.getState().setOverlayVisible(id, true));
 
 beforeEach(() => {
+  mockNavigate.mockClear();
   useLayersStore.setState(useLayersStore.getInitialState(), true);
   useWildfireStore.setState({ collection: null, fetchedAt: null, status: 'idle', error: null });
 });
@@ -142,5 +145,15 @@ describe('load-as-I-pan switch', () => {
     expect(useLayersStore.getState().autoLoadOverlays).toBe(false);
     expect(switches()[2].props.value).toBe(false);
     expect(texts()).toContain('Load land data as I pan');
+  });
+});
+
+describe('download links', () => {
+  it('links Hunting units to the Downloads screen', () => {
+    mount();
+    expect(texts()).toContain('Download hunting units for your state →');
+    const link = renderer.root.findAll((n) => n.props.accessibilityRole === 'link' && typeof n.props.onPress === 'function')[0];
+    act(() => link.props.onPress());
+    expect(mockNavigate).toHaveBeenCalledWith('Downloads');
   });
 });

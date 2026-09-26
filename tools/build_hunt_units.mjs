@@ -4,10 +4,9 @@
  * the state wildlife agency's own ArcGIS service, normalizes them to one shape (src/huntUnits/), and zips the result
  * as `hunt-<st>.zip` (one `units.json`), recorded in the shared manifest for the app's Downloads -> Hunting units.
  *
- *   node tools/build_hunt_units.mjs [XX ...]     # default: every state in the registry except the bundled Idaho
+ *   node tools/build_hunt_units.mjs [XX ...]     # default: every state in the registry
  *        [--check]           fetch and report only: counts per set, sample titles, link check; writes nothing
  *        [--refresh]         ignore the fetch cache (packs/build/cache/hunt/) and download again
- *        [--include-bundled] also build Idaho (it ships inside the app, so it is skipped by default)
  *        [--concurrency N]   states fetched at once (default 3)
  *        [--publish]         upload the zips + manifest to the rolling `data` GitHub release (needs `gh`)
  *
@@ -25,17 +24,15 @@ import { HUNT_STATE_BY_CODE, HUNT_STATES } from '../src/huntUnits/registry.ts';
 import { HUNT_UNITS_ENTRY_NAME } from '../src/packs/regionPacks.ts';
 import { buildDir, publishBuild, readManifest, writeManifest } from './packManifest.mjs';
 
-const BUNDLED = new Set(['ID']);
 const cacheDir = path.join(buildDir, 'cache', 'hunt');
 
 function parseArgs(argv) {
-  const options = { check: false, refresh: false, includeBundled: false, publish: false, concurrency: 3 };
+  const options = { check: false, refresh: false, publish: false, concurrency: 3 };
   const codes = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--check') options.check = true;
     else if (arg === '--refresh') options.refresh = true;
-    else if (arg === '--include-bundled') options.includeBundled = true;
     else if (arg === '--publish') options.publish = true;
     else if (arg === '--concurrency') options.concurrency = Number(argv[++i]);
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
@@ -54,7 +51,7 @@ if (options.check && options.publish) {
   console.error('--check writes nothing, so it cannot --publish.');
   process.exit(1);
 }
-const states = HUNT_STATES.filter((s) => (codes.length ? codes.includes(s.code) : options.includeBundled || !BUNDLED.has(s.code)));
+const states = HUNT_STATES.filter((s) => !codes.length || codes.includes(s.code));
 
 async function pool(items, concurrency, worker) {
   let next = 0;

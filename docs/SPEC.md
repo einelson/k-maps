@@ -133,6 +133,14 @@ Each extra zoom level is **4x**. Default recommendation: **z16 for imagery, z16 
 5. Actions per cell: pause, resume, delete, update.
 6. Storage screen: size by layer and by cell, "delete all satellite", etc.
 
+**As built.** Downloads is three tabs (Pick an area / Ready-made / On this phone). Instead of dragging a
+rectangle, a tap picks a *block* of cells whose side doubles as the map zooms out (1, 2, 4, 8, 16 cells; always
+roughly a finger's width on screen), aligned to the grid so blocks tile exactly (`src/downloads/blockSelect.ts`),
+plus "pick everything in view", with a cap of 500 cells per download. The plan skips anything already complete
+(`src/downloads/downloadPlan.ts`), the footer totals size and time and blocks a download that doesn't fit in free
+space, and progress lives in a store (`src/state/useDownloadRunStore.ts`) so it outlives the screen. Not built:
+pause/resume, per-cell delete for raster tiles, concurrent fetching (cells run one at a time).
+
 ### 4.4 Downloader behavior
 - Concurrency 4-6 requests, exponential backoff, and a descriptive `User-Agent`. **Be gentle**: these are shared public servers.
 - Resumable: the coverage table records which `(layer, z, x, y)` are done, so restart skips them.
@@ -372,11 +380,20 @@ Tapping a track opens its dashboard: distance, elapsed and moving time, average 
 
 1. **Map**: base map, layers button, filter chips, draw toolbar, GPS button, compass, scale bar, coordinate readout
 2. **Layers sheet**: base map switcher, overlay toggles + opacity, land legend, saved views
-3. **Downloads**: cell grid, layer and zoom picker, size estimate, queue, storage manager
+3. **Downloads**: three tabs — pick an area (cell grid with zoom-scaled block selection, layer and detail picker, size estimate, progress), ready-made regions and hunting units, and a storage manager
 4. **Items**: list by folder, search, multi-select (move, recolor, tag, delete, export)
 5. **Feature detail/editor**: name, notes, photos, folder, color, icon, tags, coordinates
 6. **Import/Export and backup**
 7. **Settings**: units (imperial/metric), coordinate format, appearance (system/light/dark), default zoom limits, attribution and data-vintage info
+
+**What is remembered between launches.** Every store that holds a choice the user made is saved to expo-sqlite's
+key-value store as it changes (synchronous, so it is in place before the first render) and restored by a `merge`
+that fills in anything a newer version added and discards anything unreadable (`src/state/persistHelpers.ts`):
+layers (`kmaps.layers`), filters and filter presets (`kmaps.filters`, without the Items search text), POI toggles
+(`kmaps.poi`), saved views (`kmaps.savedViews`), download choices (`kmaps.downloadOptions`, not the picked cells),
+the main map's camera (`kmaps.camera`), settings (`kmaps.settings`), hunting-unit installs and acceptances, and
+region-pack installs. Deliberately not saved: the location dot (it needs this session's permission), a recording
+in progress (SQLite already holds that) and anything transient (draw tool, selection, download progress).
 
 ---
 
@@ -409,10 +426,21 @@ incompatible change):
   ]
 }
 ```
+**US only, all 50 states (as built).** K-Maps is a US app, so nothing is drawn or fetched for anywhere else.
+`assets/us/us-cells.json` (built by `tools/build_us_outline.mjs` from Census 1:500,000 state boundaries) marks each z10
+cell wholly inside, wholly outside, or on a coast/border of the US, with the US part of edge cells; the pack fetchers
+take it in their context (`PackContext.us`, `src/packs/usCoverage.ts`, `usFilter.ts`): outside cells are skipped, the
+"likely private" inference starts from US land instead of the whole cell rectangle, and edge-cell OSM lines/POI points
+outside the US are dropped. Each state's cells come from the same data (`tools/data/us-state-cells.json`), so a state
+is exactly the cells its outline touches. Land, MVUM and trails are fetched per cell (`tools/build_all_states.sh`);
+OSM roads and POI pins come from Geofabrik state extracts (`tools/osm_cells.py`, `tools/finalize_osm_cells.mjs`)
+because Overpass takes minutes per cell. Manifest format 2 lets a layer be split into ~40 MB parts, each listing its
+cells (`RegionPackFile.cells`), because the app unzips a pack in memory.
+
 **Hunting units (as built).** Every state agency's hunt units / management zones are downloaded as one small zip per
 state (`hunt-<st>.zip`, a single normalized GeoJSON `units.json`), listed under `huntUnits` in the same manifest with
-each state's bounding box, unit sets (species) and source agency. Idaho is bundled; the others install from
-Downloads and are drawn from a local `file://` GeoJSON source, so they work offline. Only states overlapping the view
+each state's bounding box, unit sets (species) and source agency. Every state, Idaho included, installs from
+Downloads and is drawn from a local `file://` GeoJSON source, so they work offline. Only states overlapping the view
 are mounted (`src/map/huntUnitWindow.ts`). Sources and per-state column mappings: `src/huntUnits/registry.ts`.
 
 Because a region installs hundreds of cells and each mounted cell is a MapLibre source plus style layers,

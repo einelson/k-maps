@@ -17,11 +17,12 @@ import { DEFAULT_PIN_COLOR, DEFAULT_PIN_STYLE } from '../features/pinStyles';
 import { canRemoveVertex, geometryToVertices, verticesToGeometry } from '../features/vertexEdit';
 import { discardTrackRecording, finishTrackRecording, startTrackRecording } from '../features/trackRecorder';
 import { EditLayers } from '../map/EditLayers';
-import { DEFAULT_CENTER, DEFAULT_ZOOM, MapScreenMap } from '../map/MapView';
+import { MapScreenMap } from '../map/MapView';
 import { PinDraftLayers } from '../map/PinLayers';
 import { SavedFeaturesLayers } from '../map/SavedFeaturesLayers';
 import { useSavedFeatures } from '../map/useSavedFeatures';
 import type { RootStackParamList } from '../navigation/RootNavigator';
+import { useCameraStore } from '../state/useCameraStore';
 import { useDrawStore } from '../state/useDrawStore';
 import { useEditStore } from '../state/useEditStore';
 import { useFiltersStore } from '../state/useFiltersStore';
@@ -116,7 +117,7 @@ export function MapScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'Map'>>();
   const cameraRef = useRef<CameraRef>(null);
   const mapRef = useRef<MapRef>(null);
-  const zoomRef = useRef(DEFAULT_ZOOM);
+  const zoomRef = useRef(useCameraStore.getState().zoom);
   const activeTool = useDrawStore((s) => s.activeTool);
   const setActiveTool = useDrawStore((s) => s.setActiveTool);
   const draftVertices = useDrawStore((s) => s.draftVertices);
@@ -139,7 +140,7 @@ export function MapScreen() {
   const editHistoryLength = useEditStore((s) => s.history.length);
   const editing = editingId != null;
   const { data: savedFeatures, reload: reloadSavedFeatures } = useSavedFeatures();
-  const [center, setCenter] = useState<[number, number]>(DEFAULT_CENTER);
+  const [center, setCenter] = useState<[number, number]>(() => useCameraStore.getState().center);
   /** The pin being created in the bottom card — only saved when the card's Save is pressed. */
   const [pinDraft, setPinDraft] = useState<PinDraft | null>(null);
   const [savingPin, setSavingPin] = useState(false);
@@ -445,6 +446,7 @@ export function MapScreen() {
           onViewStateChange={(viewState) => {
             setCenter(viewState.center);
             zoomRef.current = viewState.zoom;
+            useCameraStore.getState().setView(viewState.center, viewState.zoom);
           }}
           scaleBarBottom={72}
           compassTop={insets.top + SECOND_BUTTON_OFFSET + MAP_BUTTON_SIZE + 8}
@@ -595,6 +597,10 @@ export function MapScreen() {
             onOpenAdvanced={() => {
               setPanel('none');
               navigation.navigate('Layers');
+            }}
+            onOpenDownloads={() => {
+              setPanel('none');
+              navigation.navigate('Downloads');
             }}
           />
         )}

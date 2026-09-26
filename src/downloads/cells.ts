@@ -51,11 +51,13 @@ export function lonLatToCell(lon: number, lat: number): { cx: number; cy: number
 /** Web Mercator only reaches this far; `lonLatToCell` would return NaN/negative rows beyond it. */
 const MAX_MERCATOR_LAT = 85.0511;
 
-/** Every z10 cell a `[west, south, east, north]` view touches (a view crossing the antimeridian isn't handled — US-first, §1). */
-export function cellsInBounds([west, south, east, north]: [number, number, number, number]): {
-  cx: number;
-  cy: number;
-}[] {
+/** The rectangle of z10 cells a `[west, south, east, north]` view touches, from its corners alone (no per-cell work). */
+export function cellRangeInBounds([west, south, east, north]: [number, number, number, number]): {
+  cxMin: number;
+  cxMax: number;
+  cyMin: number;
+  cyMax: number;
+} {
   const clampLat = (lat: number) => Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, lat));
   const max = (1 << CELL_ZOOM) - 1;
   const clampCell = (v: number) => Math.max(0, Math.min(max, v));
@@ -63,9 +65,18 @@ export function cellsInBounds([west, south, east, north]: [number, number, numbe
   const EPS = 1e-9;
   const nw = lonLatToCell(west, clampLat(north));
   const se = lonLatToCell(east - EPS, clampLat(south + EPS));
+  return { cxMin: clampCell(nw.cx), cxMax: clampCell(se.cx), cyMin: clampCell(nw.cy), cyMax: clampCell(se.cy) };
+}
+
+/** Every z10 cell a `[west, south, east, north]` view touches (a view crossing the antimeridian isn't handled — US-first, §1). */
+export function cellsInBounds(bounds: [number, number, number, number]): {
+  cx: number;
+  cy: number;
+}[] {
+  const { cxMin, cxMax, cyMin, cyMax } = cellRangeInBounds(bounds);
   const cells: { cx: number; cy: number }[] = [];
-  for (let cy = clampCell(nw.cy); cy <= clampCell(se.cy); cy++) {
-    for (let cx = clampCell(nw.cx); cx <= clampCell(se.cx); cx++) cells.push({ cx, cy });
+  for (let cy = cyMin; cy <= cyMax; cy++) {
+    for (let cx = cxMin; cx <= cxMax; cx++) cells.push({ cx, cy });
   }
   return cells;
 }

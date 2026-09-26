@@ -31,6 +31,8 @@ export interface OverlayOption {
   disabled?: boolean;
   /** Needs a connection: drawn from a live service, with nothing to download. */
   onlineOnly?: boolean;
+  /** For overlays with more data to download: the text of a link under the toggle that opens the Downloads screen. */
+  downloadsLink?: string;
   /** Color key shown on the Layers screen while the overlay is on. */
   legend?: LegendEntry[];
   /** Credit added to the on-map attribution while the overlay is on. */
@@ -72,7 +74,8 @@ export const OVERLAYS: OverlayOption[] = [
     id: 'huntUnits',
     group: 'land',
     label: 'Hunting units',
-    note: "Hunt units, management zones and hunt districts from each state's wildlife agency. Idaho is built in; download other states under Downloads → Hunting units and they keep working offline. Tap a boundary line or unit number for the unit and the agency's regulations. For reference only: boundaries can be out of date or inaccurate — check your state's current hunting regulations and local laws before you hunt.",
+    note: "Hunt units, management zones and hunt districts from each state's wildlife agency. Download your state under Downloads → Hunting units; it is stored on the device and keeps working offline. Tap a boundary line or unit number for the unit and the agency's regulations. For reference only: boundaries can be out of date or inaccurate — check your state's current hunting regulations and local laws before you hunt.",
+    downloadsLink: 'Download hunting units for your state',
     legend: [{ color: HUNT_UNIT_COLOR, label: 'Unit boundary' }],
     attribution: 'State wildlife agencies',
   },
@@ -82,7 +85,7 @@ export const OVERLAYS: OverlayOption[] = [
     id: 'osm',
     group: 'roads',
     label: 'Roads & trails (OSM)',
-    note: 'OpenStreetMap roads, dirt tracks and trails with names, drawn over any base map (dashed = track/trail). Download it per cell under Downloads → Overlay data. Topo and Hybrid already have roads baked in.',
+    note: 'OpenStreetMap roads, dirt tracks and trails with names, drawn over any base map (dashed = track/trail). Download whole states under Downloads → Ready-made, or pick an area there. Topo and Hybrid already have roads baked in.',
     attribution: '© OpenStreetMap contributors',
   },
   {

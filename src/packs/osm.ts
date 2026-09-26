@@ -11,6 +11,7 @@ import { clipLineGeometry, roundLine } from './clip.ts';
 import type { LineGeometry } from './clip.ts';
 import { httpSettings, overpassQuery, sleep, throwIfAborted } from './http.ts';
 import type { Bounds, PackContext, PackFeature, PackFeatureCollection } from './types.ts';
+import { emptyCollection, restrictToUs, usRestriction } from './usFilter.ts';
 import type { Position } from 'geojson';
 
 export type OsmRoadClass = 'highway' | 'primary' | 'street' | 'track' | 'path';
@@ -134,6 +135,11 @@ export function createWayAccumulator(bounds: Bounds) {
 }
 
 export async function fetchOsmRoadsPack(bounds: Bounds, ctx: PackContext = {}): Promise<PackFeatureCollection> {
+  const us = usRestriction(bounds, ctx.us);
+  if (us.skip) {
+    ctx.onProgress?.(1);
+    return emptyCollection(); // no US land in this cell
+  }
   const boxes = splitBounds(bounds);
   const acc = createWayAccumulator(bounds);
   ctx.onProgress?.(0);
@@ -146,5 +152,5 @@ export async function fetchOsmRoadsPack(bounds: Bounds, ctx: PackContext = {}): 
     acc.add(json.elements);
     ctx.onProgress?.((i + 1) / boxes.length);
   }
-  return { type: 'FeatureCollection', features: acc.features };
+  return { type: 'FeatureCollection', features: us.contains ? restrictToUs(acc.features, us.contains) : acc.features };
 }

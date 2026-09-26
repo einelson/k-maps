@@ -10,6 +10,7 @@ import { fetchTrailsPack } from '../packs/trails.ts';
 import { isCellBundled } from '../packs/region.ts';
 import type { Bounds, PackContext, PackFeatureCollection, PackLayerId } from '../packs/types.ts';
 import { cellBounds } from './cells';
+import { US_COVERAGE } from './usCells';
 import { deleteCoverage, getCoverage, upsertCoverage } from './coverageRepo';
 
 /**
@@ -61,6 +62,7 @@ export async function downloadPackCell(options: DownloadPackCellOptions): Promis
     if (signal?.aborted) throw abortError();
     const collection = await FETCHERS[layer](cellBounds(cx, cy), {
       signal,
+      us: US_COVERAGE,
       // Leave the last sliver for writing the file.
       onProgress: (fraction) => onProgress?.(Math.min(0.95, fraction * 0.95)),
     });

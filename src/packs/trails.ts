@@ -10,6 +10,7 @@ import { clipLineGeometry } from './clip.ts';
 import type { LineGeometry } from './clip.ts';
 import { throwIfAborted } from './http.ts';
 import type { Bounds, PackContext, PackFeature, PackFeatureCollection } from './types.ts';
+import { emptyCollection, usRestriction } from './usFilter.ts';
 
 export const TRAILS_SERVICE_URL =
   'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_TrailNFSPublish_01/MapServer/0';
@@ -90,6 +91,11 @@ export function trailProperties(props: Record<string, unknown>): Record<string, 
 }
 
 export async function fetchTrailsPack(bounds: Bounds, ctx: PackContext = {}): Promise<PackFeatureCollection> {
+  const us = usRestriction(bounds, ctx.us);
+  if (us.skip) {
+    ctx.onProgress?.(1);
+    return emptyCollection(); // no US land in this cell
+  }
   const [w, s, e, n] = bounds;
   ctx.onProgress?.(0);
   throwIfAborted(ctx.signal);

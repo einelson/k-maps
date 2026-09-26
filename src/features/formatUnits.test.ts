@@ -7,6 +7,7 @@ import {
   formatDuration,
   formatElapsedShort,
   formatElevation,
+  formatArea,
   formatElevationChange,
   formatSpeed,
 } from './formatUnits';
@@ -97,5 +98,23 @@ describe('formatSpeed', () => {
     expect(formatSpeed(1, 'imperial')).toBe('2.2 mph');
     expect(formatSpeed(1, 'metric')).toBe('3.6 km/h');
     expect(formatSpeed(0, 'metric')).toBe('0.0 km/h');
+  });
+});
+
+describe('formatArea', () => {
+  it('reads square kilometres as square miles for imperial, rounded to two significant figures', () => {
+    expect(formatArea(22_500, 'imperial')).toBe('8,700 sq mi');
+    expect(formatArea(800, 'imperial')).toBe('310 sq mi');
+  });
+
+  it('keeps square kilometres for metric', () => {
+    expect(formatArea(22_487, 'metric')).toBe('22,000 km²');
+    expect(formatArea(780, 'metric')).toBe('780 km²');
+  });
+
+  it('shows small areas as they are, and never a negative or fractional one', () => {
+    expect(formatArea(0, 'metric')).toBe('0 km²');
+    expect(formatArea(7, 'metric')).toBe('7 km²');
+    expect(formatArea(2, 'imperial')).toBe('1 sq mi');
   });
 });

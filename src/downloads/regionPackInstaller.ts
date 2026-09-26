@@ -6,6 +6,7 @@ import { abortError, throwIfAborted } from '../packs/http.ts';
 import { writePackCellText } from '../packs/packStorage.ts';
 import {
   cellEntryName,
+  packFileCells,
   REGION_PACK_MANIFEST_URL,
   regionPackUrl,
   type RegionEntry,
@@ -53,7 +54,8 @@ const yieldToUi = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 export async function installRegionPack(options: InstallRegionPackOptions): Promise<InstallRegionPackResult> {
   const { appDb, region, pack, signal, onProgress } = options;
   const url = regionPackUrl(options.manifestUrl ?? REGION_PACK_MANIFEST_URL, pack.file);
-  const zipFile = new File(Paths.cache, `region-${region.id}-${pack.layer}.zip`);
+  const zipFile = new File(Paths.cache, `region-${region.id}-${pack.file}`);
+  const cells = packFileCells(region, pack); // a layer split into parts installs one part's cells at a time
 
   try {
     if (zipFile.exists) zipFile.delete();
@@ -75,7 +77,7 @@ export async function installRegionPack(options: InstallRegionPackOptions): Prom
     } catch {
       throw new Error(`${region.name} ${pack.layer} pack didn't download correctly — try again`);
     }
-    const missing = region.cells.filter(([cx, cy]) => !zip.file(cellEntryName(cx, cy))).length;
+    const missing = cells.filter(([cx, cy]) => !zip.file(cellEntryName(cx, cy))).length;
     if (missing > 0) {
       throw new Error(`${region.name} ${pack.layer} pack is incomplete (${missing} cells missing) — try again later`);
     }
@@ -91,9 +93,9 @@ export async function installRegionPack(options: InstallRegionPackOptions): Prom
 
     let bytes = 0;
     let keptNewer = 0;
-    for (let start = 0; start < region.cells.length; start += BATCH_SIZE) {
+    for (let start = 0; start < cells.length; start += BATCH_SIZE) {
       throwIfAborted(signal);
-      const batch = region.cells.slice(start, start + BATCH_SIZE);
+      const batch = cells.slice(start, start + BATCH_SIZE);
       const rows: { cx: number; cy: number; bytes: number }[] = [];
       for (const [cx, cy] of batch) {
         if (isCellBundled(pack.layer, cx, cy)) {
@@ -112,12 +114,12 @@ export async function installRegionPack(options: InstallRegionPackOptions): Prom
           await upsertCoverage(appDb, { layer: pack.layer, cx, cy, maxZoom: 0, status: 'complete', bytes: cellBytes });
         }
       });
-      onProgress?.(DOWNLOAD_SHARE + (1 - DOWNLOAD_SHARE) * Math.min(1, (start + batch.length) / region.cells.length));
+      onProgress?.(DOWNLOAD_SHARE + (1 - DOWNLOAD_SHARE) * Math.min(1, (start + batch.length) / cells.length));
       await yieldToUi();
     }
 
     onProgress?.(1);
-    return { cells: region.cells.length, bytes, keptNewer };
+    return { cells: cells.length, bytes, keptNewer };
   } catch (err) {
     // The download library's own abort error isn't guaranteed to be named AbortError.
     if (signal?.aborted) throw abortError();

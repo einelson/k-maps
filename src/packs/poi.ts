@@ -6,6 +6,7 @@
 
 import { httpSettings, overpassQuery, sleep, throwIfAborted } from './http.ts';
 import type { Bounds, PackContext, PackFeature, PackFeatureCollection } from './types.ts';
+import { emptyCollection, restrictToUs, usRestriction } from './usFilter.ts';
 
 export type PoiPackCategory = 'boatLaunches' | 'campsitesTrails';
 
@@ -52,6 +53,11 @@ export function overpassNodesToFeatures(
 }
 
 export async function fetchPoiPack(bounds: Bounds, ctx: PackContext = {}): Promise<PackFeatureCollection> {
+  const us = usRestriction(bounds, ctx.us);
+  if (us.skip) {
+    ctx.onProgress?.(1);
+    return emptyCollection(); // no US land in this cell
+  }
   const queries = poiQueries(bounds);
   const categories = Object.keys(queries) as PoiPackCategory[];
   const features: PackFeature[] = [];
@@ -66,5 +72,5 @@ export async function fetchPoiPack(bounds: Bounds, ctx: PackContext = {}): Promi
     features.push(...overpassNodesToFeatures(json.elements, category, bounds));
     ctx.onProgress?.((i + 1) / categories.length);
   }
-  return { type: 'FeatureCollection', features };
+  return { type: 'FeatureCollection', features: us.contains ? restrictToUs(features, us.contains) : features };
 }

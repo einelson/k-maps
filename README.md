@@ -31,27 +31,68 @@ token they rely on; what's untested is how they look and behave on the phone.
   toggle that renders from a downloaded MBTiles file via MapLibre Native's `mbtiles://` scheme
   instead of live tiles (§4.6) — the scheme itself is confirmed to exist upstream, but this app's
   exact path handling is unverified (§12.4)
-- **Land, MVUM, USFS trails, POI and OSM data work anywhere in the US.** Downloads → *Overlay
-  data* fetches each selected cell straight from the public services on the device (PAD-US, USFS
+- **Land, MVUM, USFS trails, POI and OSM data work anywhere in the United States — and only there.** Downloads → *Pick an area*
+  fetches each picked square straight from the public services on the device (PAD-US, USFS
   MVUM and trails, Overpass) and stores one JSON file per cell; the map draws them via MapLibre
   `file://` GeoJSON sources. The southwest Idaho starter region (30 cells) is still bundled so
   first launch isn't empty. Cell-aligned, so downloaded cells never overlap it, and outlines are
   stripped along cell edges so there are no artificial grid lines
 - **Land coverage grows as you pan.** The bundled starter region used to be the only place public
   land showed. Now, while online, the main map fetches public land (+ likely-private shading),
-  MVUM and USFS trails for the z10 cells in view (from zoom 10 in, nearest cells first, at most 12
-  per view, one at a time, only for overlays that are switched on) and keeps them on the device,
-  so anywhere you've looked works offline later. After two failures in a row it assumes there's no
-  signal and pauses for two minutes; a failed cell isn't retried for five. A small "Loading map
-  data…" chip shows progress. Switch it off with Layers → *Load land data as I pan*. OSM and POI
-  stay manual — the free Overpass servers are too slow to fetch behind your back
-- **Region packs (Downloads → Region packs).** A whole region's land, forest roads and USFS trails in
-  one download per layer, from prebuilt zips on the repo's rolling `data` GitHub release, instead of
-  fetching hundreds of cells from the public services. Idaho is 329 cells: 40 MB to download
-  (land 15 + MVUM 19 + trails 7), about 165 MB once unzipped on the device. The zip holds the exact
-  per-cell files the on-device downloader writes, so installing is unzipping into the same layout;
-  it never overwrites bundled starter cells or cells the device fetched after the pack was built,
-  and shows "Update" when a newer pack is published. Built by `tools/build_region_pack.mjs`
+  MVUM and USFS trails for the z10 cells in view (from zoom 9 in — the same zoom the map starts drawing
+  downloaded cells at — nearest cells first, at most 12 per view, one at a time, only for overlays that
+  are switched on) and keeps them on the device, so anywhere you've looked works offline later. After two
+  failures in a row it assumes there's no signal and pauses for two minutes; a failed cell isn't retried
+  for five. A chip at the top of the map says what's going on: "Loading map data…", "Zoom in to see land
+  data here" (below zoom 9, outside the bundled region — otherwise the layer just looks like it only
+  exists around Boise) or "Couldn't load land data" (after those failures). Switch it off with Layers →
+  *Load land data as I pan*. OSM and POI stay manual — the free Overpass servers are too slow to fetch
+  behind your back. How big is "everywhere"? Measured: Idaho's 329 cells are 60 MB of land data on the
+  phone (184 KB a cell on average, 1.3 MB at most) and a 15 MB download, and the app's own fetcher takes
+  4–10 s a cell on a laptop (Salt Lake, Missoula and central Nevada cells). The whole US (15,288 z10 cells
+  that touch US land, 6,065 of them Alaska) came to 1.4 GB of land data on a phone and a 388 MB download —
+  fine a state at a time, too much to ship in the app, which is why panning, Pick an area and region packs
+  exist instead of one big download
+- **Downloads is three tabs, not one long scroll.** *Pick an area* (the map, what to save, a footer
+  that always shows the total, and the Download button at the right end of the header), *Ready-made* (region
+  packs and hunting units — the hunting-units list starts folded, with the states already on the phone first)
+  and *On this phone* (what's stored, free space, delete overlay data). A tap on the map picks a
+  **block of squares sized to the zoom** — 1 square from zoom 9 in, then 2×2, 4×4, 8×8, 16×16 as you
+  zoom out — always about a finger's width on screen; the grid it picks from is drawn on the map, tapping
+  a picked block again puts it back, and *Pick everything in view* picks the whole screen (at most 500
+  squares at once; Idaho is 329) (`src/downloads/blockSelect.ts`). Squares already on the phone are
+  skipped, so a big selection can be re-run after a hiccup without fetching everything again. The
+  footer shows size and time before you start and says why the Download button is off (for example, the
+  phone has no room); anything over 1 GB asks first, and live progress (Cancel, and which files failed
+  and why) keeps running if you leave the screen (`src/downloads/startDownload.ts`)
+- **Remembers how you left the app.** Base map, which layers are on and their opacity, name labels,
+  offline-maps and load-as-I-pan switches, POI toggles, the active map filters and saved filter presets,
+  saved views, the download choices (map pictures, overlay data, detail level) and where the map was
+  looking are saved as they change and restored on the next launch, alongside units, coordinate format and
+  appearance (`src/state/persistHelpers.ts`). A layer added in a later version starts from its default
+  instead of being undefined, and unreadable saved values fall back to defaults. Not remembered: the
+  location dot (needs this session's permission) and the My Content search box
+- **US only.** The app draws nothing for anywhere else. `assets/us/us-cells.json` (1.4 MB, built by
+  `tools/build_us_outline.mjs` from the Census Bureau's 1:500,000 state boundaries, which follow the shoreline) says
+  for each z10 cell whether it is wholly inside the US, wholly outside it, or on a coast or border — and for those
+  the exact US part of the cell (`src/packs/usCoverage.ts`). Every fetcher gets it: a cell with no US land is never
+  fetched, "likely private" is inferred only from US land (so no purple over the ocean, the Great Lakes, Canada or
+  Mexico), and in a coast or border cell OSM roads and POI pins outside the US are cut away (`src/packs/usFilter.ts`).
+  The as-you-pan loader skips such cells, and the Downloads picker can't pick them ("There is no US land there").
+  Coordinates on the border are good to about 250 m, the resolution of the source boundaries
+- **Whole states (Downloads → Ready-made).** All 50 states are prebuilt on the repo's rolling `data` GitHub release,
+  each as up to five layers — public land + private shading, forest roads (MVUM), USFS trails, OpenStreetMap roads &
+  trails and OSM points of interest — one download per layer instead of fetching hundreds of cells from the public
+  services. A layer over ~50 MB is split into ~40 MB parts (the app unzips a file in memory), installed one after
+  another and counted as one. A state is a folded card that opens once anything from it is on the phone. The zip
+  holds the exact per-cell files the on-device downloader writes, so installing is unzipping into the same layout; it
+  never overwrites bundled starter cells or cells the device fetched after the pack was built, and shows "Update"
+  when a newer pack is published. A cell on a state line is in both states' packs (its content is the same either
+  way). Built by `tools/build_region_pack.mjs`. Measured for the published packs — download (on the phone once
+  unzipped): public land + private shading 388 MB (1.4 GB), forest roads 168 MB (0.6 GB), USFS trails 48 MB
+  (0.15 GB), OSM points of interest 5 MB (10 MB), OSM roads & trails 2.0 GB (8.8 GB); 2.6 GB for the whole
+  US in 270 files, none over 50 MB. By state: California is the largest at 218 MB, then Texas 122 MB, Alaska 96 MB;
+  Rhode Island is 7 MB. OSM is most of every state, so it's the one to skip if space is tight
 - **Only cells near the view are drawn.** Every downloaded cell is a MapLibre source plus several style
   layers, so a state's worth can't all be mounted at once. The map mounts the cells in view plus one
   cell around them (at most 30 per layer) from zoom 9 in (`src/map/cellWindow.ts`); the bundled
@@ -84,9 +125,9 @@ token they rely on; what's untested is how they look and behave on the phone.
 - **Hunting units for 30 states** (each state wildlife agency's own hunt units, management zones or hunt
   districts — GMUs, WMUs, deer permit areas ...), normalized to one shape so any state draws and
   describes the same way: dashed boundaries with unit numbers, tap for the unit, its regulation links and
-  the agency's hunting-regulations page. **Idaho is bundled** (100 units, 1.4 MB); the other 29 are
-  **downloaded per state** from Downloads → Hunting units (9.7 MB for all 29, 0.02–1.8 MB each), stored on
-  the device and drawn from there, so they work with **no connection**. States that publish separate
+  the agency's hunting-regulations page. Every state is **downloaded per state** from Downloads → Hunting
+  units (12.5 MB for all 30, 0.02–2.7 MB each; nothing is built into the app), stored on the device and
+  drawn from there, so they work with **no connection**. States that publish separate
   species layers (Wyoming, Montana, Michigan, ...) get a picker for which one to show. Outline-only on
   purpose — MapLibre gives a tap to the topmost source, so a fill would block taps on the land polygons
   beneath. **Only official agency data is included** (each source is checked to belong to the state's own
@@ -97,7 +138,7 @@ token they rely on; what's untested is how they look and behave on the phone.
   (or that the agency's service doesn't publish a date), so nobody mistakes an old layer for a current one.
   **A layer whose source data was last edited 3+ years ago must be accepted separately**: a notice naming
   each old layer and its age before it downloads, again on the map if already installed data has since aged
-  past the line (or is bundled Idaho), a red warning in the Downloads list, and a warning row on that
+  past the line, a red warning in the Downloads list, and a warning row on that
   layer's unit cards. Acceptance is remembered per state for exactly the layers and dates shown, so newly
   old or changed data asks again, and removing a state resets it (`src/map/huntUnitStaleness.ts`)
   Only states in view are mounted (`src/map/huntUnitWindow.ts`), so downloading every state doesn't slow the map. Built by
@@ -222,8 +263,11 @@ token they rely on; what's untested is how they look and behave on the phone.
 **Not implemented / known gaps:**
 
 - BLM "private/unknown" cross-check is bundled for the starter region only (not downloadable)
-- OSM roads & trails (and POI pins) are per-cell manual downloads — nothing is pre-loaded outside
-  the starter region, and a dense city cell of OSM can be large
+- The US limits use 1:500,000 boundaries, so the border and shoreline in "likely private" and in OSM / POI are good
+  to about 250 m (Chesapeake Bay and some other bays count as US land, as in the Census file). Territories (Puerto
+  Rico, Guam, ...) are not covered
+- OSM roads & trails and POI pins are prebuilt for all 50 states, but a cell you pick yourself is fetched from the
+  public Overpass servers, which take minutes per cell — use Ready-made for anything bigger than a few cells
 - Radar, NHD, NWI, slope angle and land managers are online-only rasters: nothing to download, no
   offline copy, no tap-to-identify. The spec's true-vector NHD/NWI (`ogr2ogr` → `tippecanoe`) and a
   build-time slope raster (`gdaldem slope`) would fix that but need a hosted tile pack
@@ -235,10 +279,10 @@ token they rely on; what's untested is how they look and behave on the phone.
 - Downloaded overlay cells (region packs included) aren't drawn below zoom 9, to keep the number of map
   sources bounded; the bundled starter region still is. A statewide overview at low zoom would need
   simplified or tiled data
-- Region packs exist for Idaho only (add a region in `tools/regionCells.mjs`), and the release is
-  public GitHub, so a rebuild has to be re-published by hand with `--publish`
+- The packs are a snapshot: land and trails from the day they were built, OSM from that day's Geofabrik extracts.
+  Refreshing means re-running the builds below and publishing to the public GitHub release by hand
 - As-you-pan loading covers land, MVUM and USFS trails only, and only in the main map (not the
-  Downloads screen's), from zoom 10
+  Downloads screen's), from zoom 9
 - Photos store an absolute file URI; if the app's documents path ever changes they'd show "Missing"
 - Point clustering only applies to your saved points, not the POI pins
 - Import limits: polygon holes and KML `gx:Track` are dropped, waypoint/route `<ele>`/`<time>` and icons
@@ -307,35 +351,44 @@ app runs on-device (`src/packs/`). To refresh it, or debug a pack for any bbox:
 ```bash
 node tools/build_starter_pack.mjs            # land, mvum, poi (all) or one: ... land
 node tools/fetch_blm_sma.mjs                 # BLM private/unknown cross-check
-node tools/fetch_idfg_units.mjs              # bundled Idaho hunt units (re-run each season)
-node tools/build_hunt_units.mjs --check      # dry run of every other state: counts, samples, link check
+node tools/build_hunt_units.mjs --check      # dry run of every state's hunt units: counts, samples, link check
 node tools/fetch_pack.mjs osm -116.3 43.6 -116.1 43.7 out.json   # any cell pack (land|mvum|trails|poi|osm), any bbox
 node tools/build_glyphs.mjs                  # regenerate the bundled label glyphs
 ```
 
 ## Building and publishing region packs
 
-Region packs are built on a laptop with the same fetchers the app runs (`src/packs/`), one z10 cell at a
-time, then zipped per layer into `packs/build/` (git-ignored):
+Everything runs on a laptop and lands in `packs/build/` (git-ignored). Order matters the first time:
 
 ```bash
-node tools/build_region_pack.mjs idaho               # land, mvum, trails; ~5 min for Idaho, cells are cached
-node tools/build_region_pack.mjs idaho mvum          # just one layer
-node tools/build_region_pack.mjs idaho --limit 4     # trial run on a few cells (never published)
-node tools/build_region_pack.mjs idaho --publish     # also upload the zips + manifest to the `data` release (needs gh)
+node tools/build_us_outline.mjs            # the US map the fetchers use (assets/us/us-cells.json) + each state's cells
+tools/build_all_states.sh                  # land, MVUM and USFS trails for all 50 states: five processes, a couple of hours
+python3 -m venv packs/build/osmvenv && packs/build/osmvenv/bin/pip install osmium
+tools/build_osm_states.sh                  # OSM roads + POI: downloads each state's Geofabrik extract and cuts it into cells
+node tools/finalize_osm_cells.mjs          # merge cells two states share, apply the US limits
+node tools/build_region_pack.mjs all land mvum trails poi osm   # zip every layer (splitting big ones) and write the manifest
+node tools/publish_region_packs.mjs        # upload what changed to the `data` release (needs gh); manifest last
 ```
 
-A failed cell aborts that layer's zip but keeps the rest cached, so re-running only retries what failed.
-Delete `packs/build/cache/` to refetch fresh data. The app finds packs through the manifest at
-`https://github.com/einelson/k-maps/releases/download/data/manifest.json`
-(`src/packs/regionPacks.ts`).
+Or one state at a time: `node tools/build_region_pack.mjs idaho [land] [mvum] [trails] [poi] [osm] [--limit 4] [--part 0/2]`.
+
+- **Land, MVUM, trails** are fetched by the same code the app runs on-device (`src/packs/`), a z10 cell at a time, and
+  cached per layer in `packs/build/cache/cells/<layer>/` — shared by every state, so a cell on a state line is fetched
+  once, and a failed cell only aborts that layer's zip; re-running retries just what is missing. Delete the cache to
+  refetch fresh data (and `cache/cells/land` if `assets/us/us-cells.json` changes)
+- **OSM and POI** can't come from the public Overpass servers at this scale (3-4 minutes per cell, measured, for about
+  15,000 cells). `tools/osm_cells.py` cuts them out of Geofabrik's state extracts instead (pyosmium), following the
+  app's rules exactly — the same classes, tags, 5-decimal rounding and cell clipping as `src/packs/osm.ts` — and a
+  cell it produced for Boise matches the Overpass one to within 0.1% (16,850 vs 16,839 features)
+- The app finds packs through the manifest at
+  `https://github.com/einelson/k-maps/releases/download/data/manifest.json` (`src/packs/regionPacks.ts`, manifest
+  format 2: a layer may be split into `<state>-<layer>-<n>.zip` parts that each list their cells)
 
 ## Hunting-unit coverage by state
 
 | Status | States |
 |---|---|
-| **Bundled** | ID |
-| **Downloadable** (Downloads → Hunting units) | AK AR CA CO CT FL HI KS KY MA ME MI MN MT ND NE NH NJ NM NV NY OR PA SC UT VT WA WI WY |
+| **Downloadable** (Downloads → Hunting units) | AK AR CA CO CT FL HI ID KS KY MA ME MI MN MT ND NE NH NJ NM NV NY OR PA SC UT VT WA WI WY |
 | **Left out on purpose** | AZ — only third-party copies of the AZGFD boundaries exist (a 2020 upload and a county mirror); no official layer found |
 | **Not available to us** | SD — the agency's layers exist but require sign-in |
 | **No official unit layer found** | AL DE GA IL IN IA LA MD MS MO NC OH OK RI TN TX VA WV |
@@ -375,6 +428,8 @@ Fetched states are cached in `packs/build/cache/hunt/`; a failed state keeps its
 ## Data & attribution
 
 - Basemaps: **USGS The National Map** (public domain)
+- State and country outlines (which cells are US land): **U.S. Census Bureau** cartographic boundaries, 1:500,000
+  (public domain)
 - Public land: **USGS PAD-US** — federal via a USDOT ArcGIS mirror, state/local via USGS's PAD-US
   4.1 service (public domain) — + **BLM SMA** (public domain) for the private/unknown cross-check
 - Forest roads/trails: **USFS Motor Vehicle Use Map** via the Enterprise Data Warehouse (public
@@ -388,7 +443,8 @@ Fetched states are cached in `packs/build/cache/hunt/`; a failed state keeps its
 - Land managers: **BLM National Surface Management Agency** (public domain)
 - Hunting units: each state's **wildlife agency** open GIS data (named on every unit's card and in the
   manifest) — best representation only, no warranty; display only, simplified to about 30 m (Oregon is not simplified: ODFW's terms forbid altering its boundaries)
-- POI pins, roads/trails/labels: **© OpenStreetMap contributors** (ODbL)
+- POI pins, roads/trails/labels: **© OpenStreetMap contributors** (ODbL); the prebuilt state packs are cut from
+  **Geofabrik** extracts of OpenStreetMap
 - Full licensing checklist: [docs/SPEC.md §11](docs/SPEC.md#11-licensing-and-attribution-checklist)
 
 Map data may be out of date or incorrect. Public-land boundaries are for planning only — verify

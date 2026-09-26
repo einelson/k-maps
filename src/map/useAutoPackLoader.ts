@@ -5,6 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { AutoLoader, planAutoLoad } from '../downloads/autoLoad';
 import { listCoverage } from '../downloads/coverageRepo';
 import { downloadPackCell } from '../downloads/packDownloader';
+import { US_COVERAGE } from '../downloads/usCells';
 import { isCellBundled } from '../packs/region';
 import type { PackLayerId } from '../packs/types';
 import { useAutoLoadStore } from '../state/useAutoLoadStore';
@@ -49,7 +50,9 @@ export function useAutoPackLoader({ enabled, layers }: Options): (view: ViewStat
         center: view.center,
         zoom: view.zoom,
         layers: layersRef.current,
-        isCovered: (layer, cx, cy) => isCellBundled(layer, cx, cy) || complete.has(`${layer}:${cx}:${cy}`),
+        // A cell with no US land has nothing to load, so it counts as done.
+        isCovered: (layer, cx, cy) =>
+          !US_COVERAGE.hasLand(cx, cy) || isCellBundled(layer, cx, cy) || complete.has(`${layer}:${cx}:${cy}`),
       })
     );
   }, [db]);

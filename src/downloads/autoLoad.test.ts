@@ -1,4 +1,5 @@
 import type { Bounds, PackLayerId } from '../packs/types';
+import { CELL_WINDOW_MIN_ZOOM } from '../map/cellWindow';
 import {
   AUTO_LOAD_MAX_CELLS,
   AUTO_LOAD_MAX_CONSECUTIVE_FAILURES,
@@ -33,6 +34,10 @@ const plan = (over: Partial<Parameters<typeof planAutoLoad>[0]> = {}) =>
   });
 
 describe('planAutoLoad', () => {
+  it('starts fetching at the zoom the map starts drawing downloaded cells, so nothing is fetched that cannot be shown', () => {
+    expect(AUTO_LOAD_MIN_ZOOM).toBe(CELL_WINDOW_MIN_ZOOM);
+  });
+
   it('waits until the user has zoomed in on something', () => {
     expect(plan({ zoom: AUTO_LOAD_MIN_ZOOM - 0.01 })).toEqual([]);
     expect(plan({ zoom: AUTO_LOAD_MIN_ZOOM }).length).toBeGreaterThan(0);

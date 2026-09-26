@@ -25,7 +25,7 @@ export interface RegionPackStatus {
  */
 export function regionPackStatus(
   region: RegionEntry,
-  pack: RegionPackFile,
+  pack: Pick<RegionPackFile, 'layer' | 'version'>,
   coverage: readonly CoverageRow[],
   installedVersion: string | undefined
 ): RegionPackStatus {

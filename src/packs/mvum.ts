@@ -11,6 +11,7 @@ import type { LineGeometry } from './clip.ts';
 import { throwIfAborted } from './http.ts';
 import { mvumVehicleClass } from './mvumClass.ts';
 import type { Bounds, PackContext, PackFeature, PackFeatureCollection } from './types.ts';
+import { emptyCollection, usRestriction } from './usFilter.ts';
 
 export const MVUM_SERVICE_URL = 'https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MVUM_01/MapServer';
 export const MVUM_LAYERS = [
@@ -29,6 +30,11 @@ export const MVUM_LAYERS = [
 ] as const;
 
 export async function fetchMvumPack(bounds: Bounds, ctx: PackContext = {}): Promise<PackFeatureCollection> {
+  const us = usRestriction(bounds, ctx.us);
+  if (us.skip) {
+    ctx.onProgress?.(1);
+    return emptyCollection(); // no US land in this cell
+  }
   const [w, s, e, n] = bounds;
   const features: PackFeature[] = [];
   ctx.onProgress?.(0);

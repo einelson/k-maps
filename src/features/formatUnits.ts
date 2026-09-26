@@ -40,6 +40,16 @@ export function formatDistance(meters: number, units: UnitSystem): string {
   return `${(meters / 1000).toFixed(2)} km`;
 }
 
+const SQUARE_MILES_PER_SQUARE_KM = 0.386102;
+
+/** Square kilometres -> "8,700 sq mi" / "22,500 km²", rounded to two significant figures (it's an outline, not a survey). */
+export function formatArea(squareKm: number, units: UnitSystem): string {
+  const value = units === 'imperial' ? squareKm * SQUARE_MILES_PER_SQUARE_KM : squareKm;
+  const digits = Math.max(0, Math.floor(Math.log10(Math.max(1, value))) - 1);
+  const rounded = Math.round(value / 10 ** digits) * 10 ** digits;
+  return `${withThousands(rounded)} ${units === 'imperial' ? 'sq mi' : 'km²'}`;
+}
+
 /** "8,432 ft" / "2,570 m". */
 export function formatElevation(meters: number, units: UnitSystem): string {
   return `${withThousands(elevationValue(meters, units))} ${elevationUnit(units)}`;

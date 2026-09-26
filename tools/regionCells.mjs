@@ -1,47 +1,85 @@
 /**
- * Regions the pack builder (tools/build_region_pack.mjs) knows about, and the z10 cells each one covers.
+ * Regions the pack builder (tools/build_region_pack.mjs) knows about — the 50 states — and the z10 cells each covers.
  *
- * A region is a bounding box plus an optional outline (GeoJSON polygons). With an outline, only cells that
- * touch it are kept — so a state's rectangle doesn't drag in half of Montana and Oregon. Border cells are
- * kept whole, which is what you want for hunting near a state line. To add a region, add an entry here.
+ * A state's cells are every cell its outline touches (tools/data/us-state-cells.json, written by
+ * tools/build_us_outline.mjs from the Census Bureau's 1:500,000 state boundaries). Border cells are kept whole,
+ * which is what you want near a state line, so a cell on a border is in both states' packs; its contents are the
+ * same either way (a cell's data doesn't depend on which state asked for it).
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { bbox as turfBbox, bboxPolygon, booleanIntersects } from '@turf/turf';
-
-import { cellBounds, cellsInBounds } from '../src/downloads/cells.ts';
-
 const repoRoot = path.join(import.meta.dirname, '..');
+const STATE_CELLS_FILE = path.join(repoRoot, 'tools', 'data', 'us-state-cells.json');
 
-export const REGIONS = {
-  idaho: {
-    id: 'idaho',
-    name: 'Idaho',
-    /** [west, south, east, north] */
-    bbox: [-117.25, 41.98, -111.04, 49.01],
-    /** The IDFG game-unit polygons tile the whole state, so together they are Idaho's outline. */
-    outline: 'assets/idfg/game-units.json',
-  },
+/** The 50 states. DC is only a few cells, all of them shared with Maryland and Virginia. */
+const STATE_NAMES = {
+  AL: 'Alabama',
+  AK: 'Alaska',
+  AZ: 'Arizona',
+  AR: 'Arkansas',
+  CA: 'California',
+  CO: 'Colorado',
+  CT: 'Connecticut',
+  DE: 'Delaware',
+  FL: 'Florida',
+  GA: 'Georgia',
+  HI: 'Hawaii',
+  ID: 'Idaho',
+  IL: 'Illinois',
+  IN: 'Indiana',
+  IA: 'Iowa',
+  KS: 'Kansas',
+  KY: 'Kentucky',
+  LA: 'Louisiana',
+  ME: 'Maine',
+  MD: 'Maryland',
+  MA: 'Massachusetts',
+  MI: 'Michigan',
+  MN: 'Minnesota',
+  MS: 'Mississippi',
+  MO: 'Missouri',
+  MT: 'Montana',
+  NE: 'Nebraska',
+  NV: 'Nevada',
+  NH: 'New Hampshire',
+  NJ: 'New Jersey',
+  NM: 'New Mexico',
+  NY: 'New York',
+  NC: 'North Carolina',
+  ND: 'North Dakota',
+  OH: 'Ohio',
+  OK: 'Oklahoma',
+  OR: 'Oregon',
+  PA: 'Pennsylvania',
+  RI: 'Rhode Island',
+  SC: 'South Carolina',
+  SD: 'South Dakota',
+  TN: 'Tennessee',
+  TX: 'Texas',
+  UT: 'Utah',
+  VT: 'Vermont',
+  VA: 'Virginia',
+  WA: 'Washington',
+  WV: 'West Virginia',
+  WI: 'Wisconsin',
+  WY: 'Wyoming',
 };
+
+/** `{ idaho: { id: 'idaho', name: 'Idaho', state: 'ID' }, 'new-york': ... }` */
+export const REGIONS = Object.fromEntries(
+  Object.entries(STATE_NAMES).map(([state, name]) => {
+    const id = name.toLowerCase().replaceAll(' ', '-');
+    return [id, { id, name, state }];
+  })
+);
+
+let stateCells = null;
 
 /** Sorted `[cx, cy]` list of the cells a region covers (row-major, north to south). */
 export async function regionCells(region) {
-  const candidates = cellsInBounds(region.bbox);
-  if (!region.outline) return candidates.map(({ cx, cy }) => [cx, cy]);
-
-  const outline = JSON.parse(await readFile(path.join(repoRoot, region.outline), 'utf8'));
-  const parts = outline.features.map((feature) => ({ feature, box: turfBbox(feature) }));
-  const cells = [];
-  for (const { cx, cy } of candidates) {
-    const cellBox = cellBounds(cx, cy);
-    const cell = bboxPolygon(cellBox);
-    const touches = parts.some(({ feature, box }) => {
-      // Cheap rectangle test first; the polygon test only runs for the few units near the cell.
-      if (box[2] < cellBox[0] || box[0] > cellBox[2] || box[3] < cellBox[1] || box[1] > cellBox[3]) return false;
-      return booleanIntersects(cell, feature);
-    });
-    if (touches) cells.push([cx, cy]);
-  }
+  stateCells ??= JSON.parse(await readFile(STATE_CELLS_FILE, 'utf8'));
+  const cells = stateCells[region.state];
+  if (!cells) throw new Error(`No cells for ${region.state} — run node tools/build_us_outline.mjs`);
   return cells;
 }

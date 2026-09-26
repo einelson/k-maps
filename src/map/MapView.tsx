@@ -17,11 +17,16 @@ import {
 import type { StyleSpecification } from '@maplibre/maplibre-gl-style-spec';
 import type { FeatureCollection, Point } from 'geojson';
 
+import { AUTO_LOAD_MIN_ZOOM } from '../downloads/autoLoad';
+import { lonLatToCell } from '../downloads/cells';
+import { US_COVERAGE } from '../downloads/usCells';
 import { localRasterTileUrl } from '../downloads/mbtiles';
 import { huntUnitsExist, huntUnitsUri } from '../huntUnits/storage';
 import type { HuntStateInfo } from '../huntUnits/types';
 import type { PackLayerId } from '../packs/types';
+import { isCellBundled } from '../packs/region';
 import { useAutoLoadStore } from '../state/useAutoLoadStore';
+import { useCameraStore } from '../state/useCameraStore';
 import { resolveActiveSet, useHuntUnitStore } from '../state/useHuntUnitStore';
 import { useWildfireStore } from '../state/useWildfireStore';
 import { Text, useThemedStyles, type ThemeColors } from '../theme';
@@ -40,7 +45,6 @@ import { HuntUnitLayers, type HuntUnitPressEvent, type HuntUnitSource } from './
 import { huntStatesInView } from './huntUnitWindow';
 import { huntUnitDisclaimer, huntUnitSourceNote } from './huntUnitsStyle';
 import { acceptanceFor, staleWarningFor, unacceptedStale } from './huntUnitStaleness';
-import { IDAHO_HUNT_STATE, IDAHO_UNITS_DATA } from './huntUnitsSource';
 import { HuntUnitDisclaimerModal } from '../screens/components/HuntUnitDisclaimerModal';
 import { LiveRasterLayers } from './LiveRasterLayers';
 import { PinImages } from './PinLayers';
@@ -72,10 +76,6 @@ import {
   USGS_SHADED_RELIEF_TILE_URL,
   USGS_TILE_SIZE,
 } from './usgsSources';
-
-/** Southwest Idaho — the spec's suggested first region (§10): frequent BLM/USFS-to-private boundaries. */
-export const DEFAULT_CENTER: LngLat = [-116.2, 43.6];
-export const DEFAULT_ZOOM = 10;
 
 // Label glyphs are written to disk before the first map renders; the style then points at them.
 ensureGlyphs();
@@ -169,6 +169,8 @@ export interface MapScreenMapProps {
    * "Load data as I pan"). Off by default: the Downloads screen's map is for picking cells by hand.
    */
   autoLoad?: boolean;
+  /** Where the camera starts (read once). Defaults to where the main map was last left. */
+  initialView?: { center: [number, number]; zoom: number };
   /** Distance of the native scale bar from the bottom edge, to clear whatever the host screen puts there. */
   scaleBarBottom?: number;
   /** Distance of the compass from the top edge, to clear whatever buttons the host screen floats there. */
@@ -191,6 +193,7 @@ export function MapScreenMap({
   overlayPressEnabled = true,
   onViewStateChange,
   autoLoad = false,
+  initialView: initialViewProp,
   scaleBarBottom = 30,
   compassTop = 56,
   cameraRef,
@@ -219,12 +222,17 @@ export function MapScreenMap({
   const useOfflineMaps = useLayersStore((s) => s.useOfflineMaps);
   const poiVisibility = usePoiStore((s) => s.visibility);
   const [selected, setSelected] = useState<Selected | null>(null);
+  // Opens where the main map was last looking (read once — a Camera only takes its initial view on mount).
+  const [initialView] = useState(() => {
+    const { center, zoom } = initialViewProp ?? useCameraStore.getState();
+    return { center, zoom: Math.min(zoom, MAP_MAX_ZOOM) };
+  });
   const packCells = usePackCells();
   // Only the downloaded cells in (or next to) the view are mounted: a region pack can install hundreds,
   // and every mounted cell is a source plus several style layers.
   const { cellWindow, viewBox, updateCellWindow } = useCellWindow();
   const mountedPackCells = useMemo(() => pickWindowCells(packCells, cellWindow), [packCells, cellWindow]);
-  // Hunting units: Idaho is bundled and always mounted; downloaded states mount only when the layer is on and
+  // Hunting units are downloaded per state (Downloads -> Hunting units) and mount only when the layer is on and
   // their area is in view (each is a source plus layers, and all fifty can be downloaded).
   const huntVisible = useLayersStore((s) => s.overlayVisibility.huntUnits);
   const setOverlayVisible = useLayersStore((s) => s.setOverlayVisible);
@@ -235,19 +243,21 @@ export function MapScreenMap({
   const installedHunt = useHuntUnitStore((s) => s.installed);
   const huntActiveSets = useHuntUnitStore((s) => s.activeSets);
   const huntSources = useMemo<HuntUnitSource[]>(() => {
-    const sources: HuntUnitSource[] = [
-      { state: IDAHO_HUNT_STATE, data: IDAHO_UNITS_DATA, activeSet: resolveActiveSet(IDAHO_HUNT_STATE, undefined) },
-    ];
-    if (!huntVisible) return sources;
+    if (!huntVisible) return [];
+    const sources: HuntUnitSource[] = [];
     for (const info of huntStatesInView(Object.values(installedHunt), viewBox)) {
-      if (info.state === IDAHO_HUNT_STATE.state || !huntUnitsExist(info.state)) continue; // a cleared cache leaves a stale record
-      sources.push({ state: info, data: huntUnitsUri(info.state), activeSet: resolveActiveSet(info, huntActiveSets[info.state]) });
+      if (!huntUnitsExist(info.state)) continue; // a cleared cache leaves a stale record
+      sources.push({
+        state: info,
+        data: huntUnitsUri(info.state),
+        activeSet: resolveActiveSet(info, huntActiveSets[info.state]),
+      });
     }
     return sources;
   }, [huntVisible, installedHunt, huntActiveSets, viewBox]);
   // Layers whose source data is 3+ years old must be accepted before they're used — including ones downloaded earlier
-  // that have since aged past the line, and bundled Idaho.
-  const huntInfos = useMemo(() => [IDAHO_HUNT_STATE, ...Object.values(installedHunt)], [installedHunt]);
+  // that have since aged past the line.
+  const huntInfos = useMemo(() => Object.values(installedHunt), [installedHunt]);
   const staleUnaccepted = useMemo(() => unacceptedStale(huntInfos, staleAccepted), [huntInfos, staleAccepted]);
   const innerMapRef = useRef<MapRef | null>(null);
   const setMapRef = useCallback(
@@ -267,6 +277,14 @@ export function MapScreenMap({
     return wanted;
   }, [overlayVisibility.land, overlayVisibility.likelyPrivate, overlayVisibility.mvum, overlayVisibility.usfsTrails]);
   const onAutoLoadView = useAutoPackLoader({ enabled: autoLoad && autoLoadSetting, layers: wantedPacks });
+  // Whether to say "zoom in": land/road/trail data isn't loaded or drawn below zoom 9 (a state-sized view would be
+  // hundreds of cells), so without a word about it the layer just looks like it only exists around Boise, where the
+  // bundled starter data does draw at any zoom.
+  const [zoomedOutOfData, setZoomedOutOfData] = useState(false);
+  const updateZoomHint = useCallback((view: ViewState) => {
+    const { cx, cy } = lonLatToCell(view.center[0], view.center[1]);
+    setZoomedOutOfData(view.zoom < AUTO_LOAD_MIN_ZOOM && US_COVERAGE.hasLand(cx, cy) && !isCellBundled('land', cx, cy));
+  }, []);
 
   // A card left open would be stale (and unreachable) once taps stop opening cards, so drop it
   // when they're switched off. (Adjusting state during render, not in an effect.)
@@ -434,16 +452,21 @@ export function MapScreenMap({
           // The first region-change event isn't guaranteed to fire for the initial camera, so ask for the view.
           innerMapRef.current
             ?.getViewState()
-            .then(updateCellWindow)
+            .then((view) => {
+              updateCellWindow(view);
+              updateZoomHint(view);
+              onViewStateChange?.(view);
+            })
             .catch((err) => console.warn('Could not read the initial map view', err));
         }}
         onRegionDidChange={(event) => {
           updateCellWindow(event.nativeEvent);
+          updateZoomHint(event.nativeEvent);
           onAutoLoadView(event.nativeEvent);
           onViewStateChange?.(event.nativeEvent);
         }}
       >
-        <Camera ref={cameraRef} initialViewState={{ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM }} maxZoom={MAP_MAX_ZOOM} />
+        <Camera ref={cameraRef} initialViewState={initialView} maxZoom={MAP_MAX_ZOOM} />
 
         <Layer id={BASE_ANCHOR} type="background" layout={{ visibility: 'none' }} />
 
@@ -638,7 +661,7 @@ export function MapScreenMap({
         <Text style={styles.attributionText}>{mapAttribution(overlayVisibility)}</Text>
       </View>
 
-      <AutoLoadPill />
+      <AutoLoadPill zoomHint={zoomedOutOfData && autoLoad && autoLoadSetting && wantedPacks.length > 0} />
 
       {selected?.kind === 'poi' && (
         <View style={styles.card}>
@@ -845,18 +868,28 @@ function InfoCard({ eyebrow, title, rows, actions = [], source, dotColor, onClos
   );
 }
 
-/** Small "Loading map data…" chip while the as-you-pan loader is fetching cells for the view. */
-function AutoLoadPill() {
+/**
+ * Small status chip over the map about the land / forest-road / trail data: loading it, unable to load it, or too far
+ * zoomed out to show it. Anything that would otherwise make a missing layer look like a bug says so here instead.
+ */
+function AutoLoadPill({ zoomHint }: { zoomHint: boolean }) {
   const styles = useThemedStyles(makeStyles);
   const pending = useAutoLoadStore((s) => s.pending);
   const active = useAutoLoadStore((s) => s.active);
-  if (!active) return null;
-  const remaining = pending + 1;
+  const paused = useAutoLoadStore((s) => s.paused);
+  let text: string | null = null;
+  if (active) {
+    const remaining = pending + 1;
+    text = `Loading map data… ${remaining} ${remaining === 1 ? 'area' : 'areas'} left`;
+  } else if (zoomHint) {
+    text = 'Zoom in to see land data here';
+  } else if (paused) {
+    text = 'Couldn’t load land data — showing what’s saved';
+  }
+  if (!text) return null;
   return (
     <View pointerEvents="none" style={styles.loadPill}>
-      <Text style={styles.loadPillText}>
-        Loading map data… {remaining} {remaining === 1 ? 'area' : 'areas'} left
-      </Text>
+      <Text style={styles.loadPillText}>{text}</Text>
     </View>
   );
 }

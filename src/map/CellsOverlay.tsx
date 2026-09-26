@@ -13,7 +13,7 @@ export interface CellOverlayEntry {
   state: CellState;
 }
 
-const STATE_COLORS: Record<CellState, string> = {
+export const CELL_STATE_COLORS: Record<CellState, string> = {
   selected: '#2f6f4f',
   complete: '#3b82f6',
   partial: '#f59e0b',
@@ -24,10 +24,10 @@ const COLOR_EXPRESSION = [
   'match',
   ['get', 'state'],
   'selected',
-  STATE_COLORS.selected,
+  CELL_STATE_COLORS.selected,
   'complete',
-  STATE_COLORS.complete,
-  STATE_COLORS.partial,
+  CELL_STATE_COLORS.complete,
+  CELL_STATE_COLORS.partial,
 ] as unknown as DataDrivenPropertyValueSpecification<string>;
 
 const FILL_OPACITY_EXPRESSION = [

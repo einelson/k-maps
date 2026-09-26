@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ScrollView, StyleSheet, Switch, View, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BASE_MAPS, groupedOverlays } from '../map/layerOptions';
+import type { RootStackParamList } from '../navigation/RootNavigator';
 import { PUBLIC_LAND_META } from '../map/landSource';
 import { MVUM_META } from '../map/mvumSource';
 import { POI_CATEGORY_META, type PoiCategory } from '../map/poiSources';
@@ -18,6 +21,7 @@ const GROUPS = groupedOverlays();
 
 export function LayersScreen() {
   const styles = useThemedStyles(makeStyles);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
   const baseMap = useLayersStore((s) => s.baseMap);
   const setBaseMap = useLayersStore((s) => s.setBaseMap);
@@ -96,9 +100,12 @@ export function LayersScreen() {
           <Switch value={autoLoadOverlays} onValueChange={setAutoLoadOverlays} />
         </View>
         <Text style={styles.poiSourceNote}>
-          While you&rsquo;re online, fetches public land, MVUM roads and USFS trails for the areas you
-          look at (from zoom 10 in) and keeps them on the device, so coverage isn&rsquo;t limited to
-          the southwest Idaho starter region. Anywhere you&rsquo;ve viewed works offline later.
+          While you&rsquo;re online, fetches public land, forest roads and USFS trails for the squares you
+          look at and keeps them on the phone, so coverage isn&rsquo;t limited to the southwest Idaho
+          starter region. It starts once you&rsquo;re zoomed in about as far as a county (zoom 9);
+          farther out nothing loads. Anywhere you&rsquo;ve viewed works offline later. To have a whole
+          state ready before you go, use Downloads → Ready-made (or Pick an area for part of one). Only
+          US land is covered.
         </Text>
       </View>
 
@@ -120,6 +127,11 @@ export function LayersScreen() {
                   />
                 </View>
                 {overlay.note && <Text style={styles.poiSourceNote}>{overlay.note}</Text>}
+                {overlay.downloadsLink && (
+                  <Pressable accessibilityRole="link" style={styles.downloadsLink} onPress={() => navigation.navigate('Downloads')}>
+                    <Text style={styles.downloadsLinkText}>{overlay.downloadsLink} →</Text>
+                  </Pressable>
+                )}
                 {on && overlay.id === 'wildfire' && (
                   <Text style={styles.statusNote}>
                     {wildfireFetchedAt === null
@@ -186,7 +198,7 @@ export function LayersScreen() {
       ))}
       <Text style={styles.poiSourceNote}>
         From OpenStreetMap (© OpenStreetMap contributors) — not your own pins. Pre-loaded for the
-        southwest Idaho starter region; download other areas under Downloads → Overlay data.
+        southwest Idaho starter region; for other states use Downloads → Ready-made, or Pick an area.
       </Text>
 
       <Text style={styles.legendNote}>
@@ -278,6 +290,8 @@ const makeStyles = (c: ThemeColors) =>
     legendLabel: { fontSize: 12, color: c.textSecondary },
     poiDot: { width: 10, height: 10, borderRadius: 5 },
     poiSourceNote: { marginTop: 4, fontSize: 12, color: c.textFaint },
+    downloadsLink: { marginTop: 6, alignSelf: 'flex-start' },
+    downloadsLinkText: { fontSize: 13, fontWeight: '600', color: c.primaryText },
     opacityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
     opacityLabel: { flex: 1, color: c.textMuted },
     opacityButton: {

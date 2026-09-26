@@ -18,7 +18,9 @@ let renderer: ReactTestRenderer;
 
 function mount(props: Partial<Parameters<typeof LayersPanel>[0]> = {}) {
   act(() => {
-    renderer = create(<LayersPanel top={80} bottomClearance={100} onOpenAdvanced={() => undefined} {...props} />);
+    renderer = create(
+      <LayersPanel top={80} bottomClearance={100} onOpenAdvanced={() => undefined} onOpenDownloads={() => undefined} {...props} />
+    );
   });
 }
 
@@ -118,5 +120,24 @@ describe('LayersPanel groups', () => {
     mount();
     act(() => header('Hazards & conditions').props.onPress());
     expect(texts()).toContain('online'); // radar
+  });
+});
+
+describe('LayersPanel download links', () => {
+  const links = () => renderer.root.findAll((n) => n.props.accessibilityRole === 'link' && typeof n.props.onPress === 'function');
+
+  it('offers a link to Downloads under Hunting units that opens the Downloads screen', () => {
+    const onOpenDownloads = jest.fn();
+    mount({ onOpenDownloads });
+    expect(texts()).toContain('Download hunting units for your state →');
+    expect(links()).toHaveLength(OVERLAYS.filter((o) => o.downloadsLink && o.group === 'land').length);
+    act(() => links()[0].props.onPress());
+    expect(onOpenDownloads).toHaveBeenCalledTimes(1);
+  });
+
+  it('only overlays that define a link get one', () => {
+    mount();
+    for (const group of OVERLAY_GROUPS.slice(1)) act(() => header(group.label).props.onPress());
+    expect(links()).toHaveLength(OVERLAYS.filter((o) => o.downloadsLink).length);
   });
 });

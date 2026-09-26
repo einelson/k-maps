@@ -1,6 +1,6 @@
 /**
  * Hunting-unit constants that don't need any polygon data, so UI modules (layer lists, cards) can use them without
- * importing the bundled Idaho JSON. The data itself: huntUnitsSource.ts (Idaho) and src/huntUnits/ (every state).
+ * pulling in the map or the state registry. The data itself: src/huntUnits/ (every state).
  * The disclaimer wording lives here, once, so every place that shows it says the same thing.
  */
 import type { HuntStateInfo } from '../huntUnits/types';

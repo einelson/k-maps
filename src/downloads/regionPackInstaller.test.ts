@@ -115,6 +115,53 @@ describe('installRegionPack', () => {
     expect(mockTempFiles.size).toBe(0); // the temp zip is gone
   });
 
+  it('installs one part of a split layer: only that part\'s cells, from that part\'s own zip', async () => {
+    const all = outsideCells(6);
+    const part = all.slice(2, 4);
+    serve(await zipOf(part)); // the part's zip holds just its two cells
+    const pack: RegionPackFile = { ...packFile('osm'), file: 'test-osm-2.zip', cells: part };
+
+    const result = await installRegionPack({ appDb: db, region: region(all), pack, manifestUrl: MANIFEST_URL });
+
+    const File = jest.requireMock('expo-file-system').File;
+    expect(File.downloadFileAsync.mock.calls[0][0]).toBe('https://example.test/data/test-osm-2.zip');
+    expect(writePackCellText).toHaveBeenCalledTimes(2);
+    expect(coverageOf('osm', part[0][0], part[0][1])).toMatchObject({ status: 'complete' });
+    expect(coverageOf('osm', all[0][0], all[0][1])).toBeUndefined();
+    expect(result.cells).toBe(2);
+  });
+
+  it('a part that is missing one of its own cells is refused, though the region has plenty of others', async () => {
+    const all = outsideCells(6);
+    const part = all.slice(0, 3);
+    serve(await zipOf(part, [part[1]]));
+    const pack: RegionPackFile = { ...packFile('osm'), file: 'test-osm-1.zip', cells: part };
+
+    await expect(installRegionPack({ appDb: db, region: region(all), pack, manifestUrl: MANIFEST_URL })).rejects.toThrow(
+      /incomplete \(1 cells missing\)/
+    );
+    expect(writePackCellText).not.toHaveBeenCalled();
+  });
+
+  it('two parts of one layer use different temp files, so one cannot clobber the other', async () => {
+    const all = outsideCells(4);
+    const names: string[] = [];
+    mockDownload = async (_url, dest) => {
+      names.push(dest.uri);
+      mockTempFiles.set(dest.uri, await zipOf(dest.uri.includes('-1') ? all.slice(0, 2) : all.slice(2)));
+    };
+    for (const [n, cells] of [[1, all.slice(0, 2)], [2, all.slice(2)]] as const) {
+      await installRegionPack({
+        appDb: db,
+        region: region(all),
+        pack: { ...packFile('osm'), file: `test-osm-${n}.zip`, cells: cells as [number, number][] },
+        manifestUrl: MANIFEST_URL,
+      });
+    }
+    expect(new Set(names).size).toBe(2);
+    expect(writePackCellText).toHaveBeenCalledTimes(4);
+  });
+
   it('does not write bundled starter cells for land/mvum, but marks them covered; trails there are written', async () => {
     const { cxMin, cyMin } = BUNDLED_CELL_RECT;
     const cells: [number, number][] = [[cxMin, cyMin], ...outsideCells(1)];

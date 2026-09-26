@@ -11,9 +11,13 @@
 import type { Bounds, PackLayerId } from '../packs/types';
 import { cellsInBounds, lonLatToCell } from './cells';
 
-/** Below this the view spans dozens of cells; wait until the user zooms in on something. */
-export const AUTO_LOAD_MIN_ZOOM = 10;
-/** A tall portrait view at z10 covers ~8 cells; this leaves headroom without a runaway queue. */
+/**
+ * Below this the view spans dozens of cells; wait until the user zooms in on something. The same zoom the map
+ * starts drawing downloaded cells at (CELL_WINDOW_MIN_ZOOM, src/map/cellWindow.ts — a test keeps them equal),
+ * so data is fetched exactly when it can be shown.
+ */
+export const AUTO_LOAD_MIN_ZOOM = 9;
+/** A portrait view at z9 touches ~8-12 cells; the nearest ones to the centre are fetched, without a runaway queue. */
 export const AUTO_LOAD_MAX_CELLS = 12;
 /** A failed cell isn't retried automatically for this long. */
 export const AUTO_LOAD_RETRY_MS = 5 * 60 * 1000;

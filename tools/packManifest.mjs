@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { REGION_PACK_FORMAT, REGION_PACK_MANIFEST_URL } from '../src/packs/regionPacks.ts';
+import { REGION_PACK_FORMAT, REGION_PACK_MANIFEST_URL, REGION_PACK_MIN_FORMAT } from '../src/packs/regionPacks.ts';
 
 export const RELEASE_TAG = 'data';
 export const buildDir = path.join(import.meta.dirname, '..', 'packs', 'build');
@@ -18,7 +18,9 @@ export const manifestPath = path.join(buildDir, 'manifest.json');
 const emptyManifest = () => ({ format: REGION_PACK_FORMAT, regions: [], huntUnits: [] });
 
 function usable(json) {
-  return json && json.format === REGION_PACK_FORMAT && Array.isArray(json.regions);
+  return (
+    json && json.format >= REGION_PACK_MIN_FORMAT && json.format <= REGION_PACK_FORMAT && Array.isArray(json.regions)
+  );
 }
 
 /** The local manifest, else the published one, else empty. Always has `regions` and `huntUnits` arrays. */
@@ -45,6 +47,7 @@ export async function readManifest() {
     }
   }
   manifest ??= emptyManifest();
+  manifest.format = REGION_PACK_FORMAT; // an older manifest is carried forward in the current layout
   manifest.huntUnits ??= [];
   return manifest;
 }
@@ -70,7 +73,12 @@ export async function publishBuild() {
   if (!releaseExists) {
     // A prerelease so it never becomes the repo's "latest" release; the app reads it by its fixed tag.
     gh([
-      'release', 'create', RELEASE_TAG, '--prerelease', '--title', 'K-Maps region data',
+      'release',
+      'create',
+      RELEASE_TAG,
+      '--prerelease',
+      '--title',
+      'K-Maps region data',
       '--notes',
       'Prebuilt region data packs the app downloads (see tools/build_region_pack.mjs and tools/build_hunt_units.mjs). ' +
         'Land data: USGS PAD-US (public domain). MVUM and trails: USFS (public domain). ' +
@@ -79,4 +87,16 @@ export async function publishBuild() {
   }
   gh(['release', 'upload', RELEASE_TAG, ...files.map((f) => path.join(buildDir, f)), '--clobber']);
   console.log(`Published ${files.length} files to release "${RELEASE_TAG}".`);
+}
+
+/** Uploads just these files (names inside packs/build) to the rolling `data` release — the manifest last, so it never lists a pack that isn't there yet. */
+export async function publishFiles(names) {
+  const releaseExists = spawnSync('gh', ['release', 'view', RELEASE_TAG], { stdio: 'ignore' }).status === 0;
+  if (!releaseExists) await publishBuild();
+  const ordered = [...names.filter((f) => f !== 'manifest.json'), ...names.filter((f) => f === 'manifest.json')];
+  // gh handles many files per call; batch so one bad connection doesn't restart hundreds of uploads.
+  for (let i = 0; i < ordered.length; i += 10) {
+    gh(['release', 'upload', RELEASE_TAG, ...ordered.slice(i, i + 10).map((f) => path.join(buildDir, f)), '--clobber']);
+  }
+  console.log(`Published ${ordered.length} files to release "${RELEASE_TAG}".`);
 }

@@ -1,16 +1,15 @@
 import { GeoJSONSource, Layer, type PressEventWithFeatures } from '@maplibre/maplibre-react-native';
 import type { FilterSpecification } from '@maplibre/maplibre-gl-style-spec';
-import type { FeatureCollection } from 'geojson';
 
 import type { HuntStateInfo } from '../huntUnits/types';
 import { TEXT_FONT } from './glyphs';
 import { HUNT_UNIT_COLOR } from './huntUnitsStyle';
 import { PACK_ANCHORS } from './PackLayers';
 
-/** One state's units to draw: bundled data (Idaho) or a `file://` URI of a downloaded state, and which unit set to show. */
+/** One state's units to draw: the `file://` URI of a downloaded state, and which unit set to show. */
 export interface HuntUnitSource {
   state: HuntStateInfo;
-  data: FeatureCollection | string;
+  data: string;
   activeSet: string;
 }
 
@@ -28,7 +27,7 @@ interface HuntUnitLayersProps {
 const setFilter = (setId: string) => ['==', ['get', 'set'], setId] as unknown as FilterSpecification;
 
 /**
- * Hunting unit boundaries and unit numbers, for every state mounted (Idaho bundled, others downloaded). Each state's
+ * Hunting unit boundaries and unit numbers, for every downloaded state mounted. Each state's
  * units carry a `set` (species / layer) and only the chosen set is drawn, so states that publish separate elk and deer
  * areas don't overlay both. Deliberately outline-only: MapLibre sends a tap to the topmost interactive source, so a
  * full-coverage fill here would swallow every tap meant for the public-land polygons underneath. The dashed boundary

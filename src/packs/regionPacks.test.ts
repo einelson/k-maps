@@ -1,9 +1,13 @@
 import {
   cellEntryName,
+  layerPacks,
+  packFileCells,
   parseCellEntryName,
   parseRegionManifest,
   REGION_PACK_FORMAT,
+  REGION_PACK_MIN_FORMAT,
   regionPackUrl,
+  type RegionEntry,
 } from './regionPacks.ts';
 
 const validManifest = () => ({
@@ -42,16 +46,31 @@ describe('parseRegionManifest', () => {
     expect(() => parseRegionManifest({ ...validManifest(), format: REGION_PACK_FORMAT + 1 })).toThrow(/update the app/);
   });
 
-  it('refuses an older format, a missing format, and non-objects', () => {
-    expect(() => parseRegionManifest({ ...validManifest(), format: REGION_PACK_FORMAT - 1 })).toThrow(/out of date/);
+  it('still reads the previous format, which only lacked parts and the OSM / POI layers', () => {
+    expect(REGION_PACK_MIN_FORMAT).toBe(1);
+    expect(parseRegionManifest({ ...validManifest(), format: 1 }).regions[0].id).toBe('idaho');
+  });
+
+  it('refuses a format older than that, a missing format, and non-objects', () => {
+    expect(() => parseRegionManifest({ ...validManifest(), format: REGION_PACK_MIN_FORMAT - 1 })).toThrow(
+      /out of date/
+    );
     expect(() => parseRegionManifest({ regions: [] })).toThrow(/format/);
     expect(() => parseRegionManifest(null)).toThrow(/not valid/);
     expect(() => parseRegionManifest([])).toThrow(/not valid/);
     expect(() => parseRegionManifest({ format: REGION_PACK_FORMAT })).toThrow(/no regions/);
   });
 
-  it('rejects unknown layers (osm is never a region pack)', () => {
-    for (const layer of ['osm', 'poi', 'bogus']) {
+  it('accepts every layer a state can have: land, MVUM, trails, POI pins and OSM roads', () => {
+    for (const layer of ['land', 'mvum', 'trails', 'poi', 'osm']) {
+      const m = validManifest();
+      m.regions[0].packs[0].layer = layer;
+      expect(parseRegionManifest(m).regions[0].packs[0].layer).toBe(layer);
+    }
+  });
+
+  it('rejects unknown layers', () => {
+    for (const layer of ['bogus', 'topo', 'Land', '']) {
       const m = validManifest();
       m.regions[0].packs[0].layer = layer;
       expect(() => parseRegionManifest(m)).toThrow(/unknown layer/);
@@ -130,7 +149,13 @@ describe('parseRegionManifest: hunting units', () => {
 
   it('parses a well-formed hunting-unit pack', () => {
     const [pack] = parseRegionManifest(withHunt()).huntUnits;
-    expect(pack).toMatchObject({ state: 'OR', name: 'Oregon', file: 'hunt-or.zip', unitCount: 69, bbox: [-124.6, 41.9, -116.4, 46.3] });
+    expect(pack).toMatchObject({
+      state: 'OR',
+      name: 'Oregon',
+      file: 'hunt-or.zip',
+      unitCount: 69,
+      bbox: [-124.6, 41.9, -116.4, 46.3],
+    });
     expect(pack.sets).toEqual([{ id: 'wmu', label: 'Wildlife Management Units', count: 69 }]);
   });
 
@@ -153,6 +178,83 @@ describe('parseRegionManifest: hunting units', () => {
   });
 
   it('rejects a huntUnits value that is not a list', () => {
-    expect(() => parseRegionManifest({ format: REGION_PACK_FORMAT, regions: [], huntUnits: 'nope' })).toThrow(/bad hunting-unit list/);
+    expect(() => parseRegionManifest({ format: REGION_PACK_FORMAT, regions: [], huntUnits: 'nope' })).toThrow(
+      /bad hunting-unit list/
+    );
+  });
+});
+
+describe('multi-part packs', () => {
+  const region: RegionEntry = {
+    id: 'montana',
+    name: 'Montana',
+    cells: [
+      [1, 1],
+      [2, 1],
+      [3, 1],
+      [4, 1],
+    ],
+    packs: [
+      { layer: 'land', file: 'montana-land.zip', bytes: 100, version: 'v1' },
+      {
+        layer: 'osm',
+        file: 'montana-osm-1.zip',
+        bytes: 40,
+        version: 'v2',
+        cells: [
+          [1, 1],
+          [2, 1],
+        ],
+      },
+      {
+        layer: 'osm',
+        file: 'montana-osm-2.zip',
+        bytes: 30,
+        version: 'v2',
+        cells: [
+          [3, 1],
+          [4, 1],
+        ],
+      },
+    ],
+  };
+
+  it('parses the cell list of a part', () => {
+    const parsed = parseRegionManifest({ format: REGION_PACK_FORMAT, regions: [region] });
+    expect(parsed.regions[0].packs[1].cells).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+    expect(parsed.regions[0].packs[0].cells).toBeUndefined();
+  });
+
+  it('rejects a bad cell list on a part', () => {
+    const bad = { ...region, packs: [{ ...region.packs[1], cells: [[1]] }] };
+    expect(() => parseRegionManifest({ format: REGION_PACK_FORMAT, regions: [bad] })).toThrow(/expected \[cx, cy\]/);
+    const notAList = { ...region, packs: [{ ...region.packs[1], cells: 'all' }] };
+    expect(() => parseRegionManifest({ format: REGION_PACK_FORMAT, regions: [notAList] })).toThrow(
+      /cells must be a list/
+    );
+  });
+
+  it("a part holds its own cells; a whole-layer file holds the region's", () => {
+    expect(packFileCells(region, region.packs[1])).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+    expect(packFileCells(region, region.packs[0])).toBe(region.cells);
+  });
+
+  it('groups files by layer, adding up the size of every part and keeping the shared build', () => {
+    const groups = layerPacks(region);
+    expect(groups.map((g) => g.layer)).toEqual(['land', 'osm']);
+    expect(groups[0]).toMatchObject({ bytes: 100, version: 'v1' });
+    expect(groups[0].files).toHaveLength(1);
+    expect(groups[1]).toMatchObject({ bytes: 70, version: 'v2' });
+    expect(groups[1].files.map((f) => f.file)).toEqual(['montana-osm-1.zip', 'montana-osm-2.zip']);
+  });
+
+  it('a region with no packs has no layers', () => {
+    expect(layerPacks({ ...region, packs: [] })).toEqual([]);
   });
 });

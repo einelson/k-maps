@@ -8,7 +8,6 @@ import type { ManifestState } from '../../downloads/useRegionManifest';
 import { deleteHuntUnits, huntUnitsExist } from '../../huntUnits/storage';
 import { isAbortError } from '../../packs/http';
 import type { HuntUnitPackEntry } from '../../packs/regionPacks';
-import { IDAHO_HUNT_STATE, IDAHO_UNITS_META } from '../../map/huntUnitsSource';
 import { HUNT_UNIT_DISCLAIMER_TITLE, huntUnitDataSummary } from '../../map/huntUnitsStyle';
 import { acceptanceFor, staleSummary, unacceptedStale, type StaleNotice } from '../../map/huntUnitStaleness';
 import { resolveActiveSet, useHuntUnitStore } from '../../state/useHuntUnitStore';
@@ -26,8 +25,8 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
 /**
  * Downloads -> "Hunting units": each state's hunt units / management zones / hunt districts from its wildlife agency,
  * one small download per state. Downloaded states are stored on the device and drawn from there, so they work with
- * no connection. Idaho ships with the app. States that publish separate species layers (Wyoming, Montana ...) get a
- * picker for which one the map shows.
+ * no connection. States that publish separate species layers (Wyoming, Montana ...) get a picker for which one the
+ * map shows.
  */
 export function HuntUnitsSection({ manifest, onRetry }: Props) {
   const styles = useThemedStyles(makeStyles);
@@ -43,6 +42,8 @@ export function HuntUnitsSection({ manifest, onRetry }: Props) {
 
   const [installing, setInstalling] = useState<{ state: string; fraction: number } | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  /** The list of states is long (30 cards), so the section starts folded away; the heading opens it. */
+  const [expanded, setExpanded] = useState(false);
   /** Downloads waiting for the hunter to acknowledge the disclaimer (once) and/or the old-data notices for these packs. */
   const [awaiting, setAwaiting] = useState<{ packs: HuntUnitPackEntry[]; general: boolean; notices: StaleNotice[] } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -59,6 +60,12 @@ export function HuntUnitsSection({ manifest, onRetry }: Props) {
     (pack: HuntUnitPackEntry) => huntUnitStatus(pack, installed[pack.state], !!installed[pack.state] && huntUnitsExist(pack.state)),
     [installed]
   );
+
+  /** States already on the device (or with an update waiting) come first, so what you've added is at the top; each group is A-Z. */
+  const ordered = useMemo(() => {
+    const rank = (pack: HuntUnitPackEntry) => (statusOf(pack) === 'none' ? 1 : 0);
+    return [...packs].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }, [packs, statusOf]);
 
   const install = useCallback(
     async (toInstall: HuntUnitPackEntry[]) => {
@@ -114,109 +121,120 @@ export function HuntUnitsSection({ manifest, onRetry }: Props) {
 
   const pending = packs.filter((pack) => statusOf(pack) !== 'installed');
   const pendingBytes = pending.reduce((sum, pack) => sum + pack.bytes, 0);
+  /** Shown beside the title so a folded section still says where things stand — and that a download is running. */
+  const onDevice = packs.filter((pack) => statusOf(pack) !== 'none').length;
+  const installingName = installing ? packs.find((pack) => pack.state === installing.state)?.name : undefined;
+  const summary = installing
+    ? `Downloading${installingName ? ` ${installingName}` : ''} ${Math.round(installing.fraction * 100)}%`
+    : packs.length > 0
+      ? `${onDevice} of ${packs.length} on device`
+      : null;
 
   return (
     <View style={styles.section}>
       <View style={styles.titleRow}>
-        <Text style={styles.sectionTitle}>Hunting units</Text>
-        {pending.length > 1 && !installing && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel="Hunting units"
+          style={styles.header}
+          onPress={() => setExpanded((open) => !open)}
+        >
+          <Text style={styles.chevron}>{expanded ? '▾' : '▸'}</Text>
+          <Text style={styles.sectionTitle}>Hunting units</Text>
+          {summary && <Text style={styles.summary}>{summary}</Text>}
+        </Pressable>
+        {expanded && pending.length > 1 && !installing && (
           <Pressable onPress={() => startInstall(pending)} hitSlop={8}>
             <Text style={styles.link}>Download all · {formatBytes(pendingBytes)}</Text>
           </Pressable>
         )}
       </View>
-      <Text style={styles.hint}>
-        Hunt units, management zones and hunt districts from each state&apos;s wildlife agency. Downloaded states are stored
-        on this device and work offline; turn the layer on in Layers.
-      </Text>
-      <View style={styles.notice}>
-        <Text style={styles.noticeTitle}>{HUNT_UNIT_DISCLAIMER_TITLE}</Text>
-        <Text style={styles.noticeText}>
-          Boundaries are for reference only and may be out of date or inaccurate. Confirm them in the current hunting
-          regulations for your state, and follow local laws, before you hunt.
-        </Text>
-      </View>
-
-      <View style={styles.row}>
-        <View style={styles.text}>
-          <Text style={styles.name}>{IDAHO_HUNT_STATE.name}</Text>
-          <Text style={styles.note}>
-            {IDAHO_UNITS_META.featureCount} units · {huntUnitDataSummary(IDAHO_HUNT_STATE)}
+      {expanded && (
+        <>
+          <Text style={styles.hint}>
+            Hunt units, management zones and hunt districts from each state&apos;s wildlife agency. Downloaded states are stored
+            on this device and work offline; turn the layer on in Layers.
           </Text>
-          {staleSummary(IDAHO_HUNT_STATE) && <Text style={styles.staleNote}>{staleSummary(IDAHO_HUNT_STATE)}</Text>}
-        </View>
-        <Text style={styles.done}>Built in</Text>
-      </View>
-
-      {manifest.status === 'loading' && <Text style={styles.note}>Checking for more states…</Text>}
-      {manifest.status === 'error' && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{manifest.message}</Text>
-          <Pressable onPress={onRetry} hitSlop={8}>
-            <Text style={styles.link}>Try again</Text>
-          </Pressable>
-        </View>
-      )}
-      {manifest.status === 'ready' && packs.length === 0 && <Text style={styles.note}>No other states have been published yet.</Text>}
-
-      {packs.map((pack) => {
-        const status = statusOf(pack);
-        const record = installed[pack.state];
-        const active = installing?.state === pack.state;
-        const shownSet = record ? resolveActiveSet(record, activeSets[pack.state]) : null;
-        return (
-          <View key={pack.state} style={styles.card}>
-            <View style={styles.cardTop}>
-              <View style={styles.text}>
-                <Text style={styles.name}>{pack.name}</Text>
-                <Text style={styles.note}>
-                  {pack.unitCount} units · {formatBytes(pack.bytes)}
-                  {status === 'none' ? '' : status === 'update' ? ' · newer version available' : ` · on this device`}
-                </Text>
-                <Text style={styles.note}>{huntUnitDataSummary(pack)}</Text>
-                {staleSummary(pack) && <Text style={styles.staleNote}>{staleSummary(pack)}</Text>}
-              </View>
-              {active ? (
-                <View style={styles.activeColumn}>
-                  <Text style={styles.percent}>{Math.round((installing?.fraction ?? 0) * 100)}%</Text>
-                  <Pressable onPress={() => abortRef.current?.abort()} hitSlop={8}>
-                    <Text style={styles.cancel}>Cancel</Text>
-                  </Pressable>
-                </View>
-              ) : status === 'installed' ? (
-                <View style={styles.activeColumn}>
-                  <Text style={styles.done}>Installed ✓</Text>
-                  <Pressable onPress={() => confirmRemove(pack)} hitSlop={8}>
-                    <Text style={styles.cancel}>Remove</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <Pressable
-                  style={[styles.button, installing !== null && styles.buttonDisabled]}
-                  disabled={installing !== null}
-                  onPress={() => startInstall([pack])}
-                >
-                  <Text style={styles.buttonText}>{status === 'update' ? 'Update' : 'Download'}</Text>
-                </Pressable>
-              )}
-            </View>
-            {record && record.sets.length > 1 && (
-              <View style={styles.chips}>
-                {record.sets.map((set) => (
-                  <Pressable
-                    key={set.id}
-                    style={[styles.chip, shownSet === set.id && styles.chipActive]}
-                    onPress={() => setActiveSet(pack.state, set.id)}
-                    accessibilityLabel={`Show ${set.label}`}
-                  >
-                    <Text style={shownSet === set.id ? styles.chipTextActive : styles.chipText}>{set.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
+          <View style={styles.notice}>
+            <Text style={styles.noticeTitle}>{HUNT_UNIT_DISCLAIMER_TITLE}</Text>
+            <Text style={styles.noticeText}>
+              Boundaries are for reference only and may be out of date or inaccurate. Confirm them in the current hunting
+              regulations for your state, and follow local laws, before you hunt.
+            </Text>
           </View>
-        );
-      })}
+
+          {manifest.status === 'loading' && <Text style={styles.note}>Checking for available states…</Text>}
+          {manifest.status === 'error' && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{manifest.message}</Text>
+              <Pressable onPress={onRetry} hitSlop={8}>
+                <Text style={styles.link}>Try again</Text>
+              </Pressable>
+            </View>
+          )}
+          {manifest.status === 'ready' && packs.length === 0 && <Text style={styles.note}>No states have been published yet.</Text>}
+
+          {ordered.map((pack) => {
+            const status = statusOf(pack);
+            const record = installed[pack.state];
+            const active = installing?.state === pack.state;
+            const shownSet = record ? resolveActiveSet(record, activeSets[pack.state]) : null;
+            return (
+              <View key={pack.state} style={styles.card}>
+                <View style={styles.cardTop}>
+                  <View style={styles.text}>
+                    <Text style={styles.name}>{pack.name}</Text>
+                    <Text style={styles.note}>
+                      {pack.unitCount} units · {formatBytes(pack.bytes)}
+                      {status === 'none' ? '' : status === 'update' ? ' · newer version available' : ` · on this device`}
+                    </Text>
+                    <Text style={styles.note}>{huntUnitDataSummary(pack)}</Text>
+                    {staleSummary(pack) && <Text style={styles.staleNote}>{staleSummary(pack)}</Text>}
+                  </View>
+                  {active ? (
+                    <View style={styles.activeColumn}>
+                      <Text style={styles.percent}>{Math.round((installing?.fraction ?? 0) * 100)}%</Text>
+                      <Pressable onPress={() => abortRef.current?.abort()} hitSlop={8}>
+                        <Text style={styles.cancel}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  ) : status === 'installed' ? (
+                    <View style={styles.activeColumn}>
+                      <Text style={styles.done}>Installed ✓</Text>
+                      <Pressable onPress={() => confirmRemove(pack)} hitSlop={8}>
+                        <Text style={styles.cancel}>Remove</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={[styles.button, installing !== null && styles.buttonDisabled]}
+                      disabled={installing !== null}
+                      onPress={() => startInstall([pack])}
+                    >
+                      <Text style={styles.buttonText}>{status === 'update' ? 'Update' : 'Download'}</Text>
+                    </Pressable>
+                  )}
+                </View>
+                {record && record.sets.length > 1 && (
+                  <View style={styles.chips}>
+                    {record.sets.map((set) => (
+                      <Pressable
+                        key={set.id}
+                        style={[styles.chip, shownSet === set.id && styles.chipActive]}
+                        onPress={() => setActiveSet(pack.state, set.id)}
+                        accessibilityLabel={`Show ${set.label}`}
+                      >
+                        <Text style={shownSet === set.id ? styles.chipTextActive : styles.chipText}>{set.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </>
+      )}
 
       {errors.map((message) => (
         <Text key={message} style={styles.errorText}>
@@ -245,15 +263,17 @@ export function HuntUnitsSection({ manifest, onRetry }: Props) {
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     section: { gap: 8 },
-    titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 8 },
+    header: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+    chevron: { width: 14, fontSize: 12, color: c.textMuted },
     sectionTitle: { fontWeight: '700' },
+    summary: { flexShrink: 1, fontSize: 12, color: c.textMuted },
     hint: { color: c.textMuted, fontSize: 13 },
     notice: { padding: 10, borderRadius: 10, borderWidth: 1, borderColor: c.borderStrong, gap: 2 },
     noticeTitle: { fontWeight: '700', fontSize: 13 },
     noticeText: { fontSize: 12, color: c.textMuted },
     note: { color: c.textMuted, fontSize: 12, marginTop: 2 },
     staleNote: { color: c.danger, fontSize: 12, fontWeight: '600', marginTop: 2 },
-    row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 10, backgroundColor: c.field },
     card: { padding: 10, borderRadius: 10, backgroundColor: c.field, gap: 8 },
     cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     text: { flex: 1 },

@@ -3,7 +3,7 @@ import { requestJson, type RequestOptions } from '../packs/http.ts';
 import { boundsOf, normalizeSet, type UnitFeature } from './normalize.ts';
 import type { HuntStateConfig } from './types.ts';
 
-/** ~30 m; display-only simplification, same reasoning as the bundled Idaho layer. */
+/** ~30 m; display-only simplification. */
 export const SIMPLIFY_DEGREES = 0.0003;
 
 export interface SetResult {

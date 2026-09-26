@@ -58,11 +58,13 @@ const texts = () => renderedTexts(renderer);
 const has = (text: string) => texts().includes(text);
 const hasMatch = (re: RegExp) => texts().some((t) => re.test(t));
 
-async function mount(manifest: ManifestState) {
+/** The section starts folded; most tests are about what's inside, so this opens it (pass `open = false` to leave it folded). */
+async function mount(manifest: ManifestState, open = true) {
   await act(async () => {
     renderer = create(<HuntUnitsSection manifest={manifest} onRetry={onRetry} />);
   });
   await settle();
+  if (open) await press(renderer, /^[▾▸]Hunting units/);
 }
 
 beforeEach(() => {
@@ -77,15 +79,77 @@ beforeEach(() => {
 afterEach(() => act(() => renderer.unmount()));
 
 describe('HuntUnitsSection', () => {
-  it('shows Idaho as built in, then each published state with its size', async () => {
+  it('lists each published state with its size, and nothing is built in', async () => {
     await mount(ready(WYOMING, OREGON));
-    expect(has('Idaho')).toBe(true);
-    expect(has('Built in')).toBe(true);
+    expect(has('Built in')).toBe(false);
     expect(hasMatch(/69 units · 1\.5 MB/)).toBe(true);
     expect(hasMatch(/405 units · 2\.6 MB/)).toBe(true);
     // alphabetical: Oregon before Wyoming
     const order = texts().filter((t) => t === 'Oregon' || t === 'Wyoming');
     expect(order).toEqual(['Oregon', 'Wyoming']);
+  });
+
+  describe('collapsing', () => {
+    const toggle = () => press(renderer, /^[▾▸]Hunting units/);
+    const header = () => renderer.root.findAll((n) => n.props.accessibilityLabel === 'Hunting units' && typeof n.props.onPress === 'function')[0];
+
+    it('starts folded; a tap on the heading opens the disclaimer and every state (and another tap folds them away again)', async () => {
+      await mount(ready(WYOMING, OREGON), false);
+      expect(header().props.accessibilityState).toEqual({ expanded: false });
+      expect(has('Hunting units')).toBe(true);
+      for (const hidden of ['Oregon', 'Wyoming', 'Download']) expect(has(hidden)).toBe(false);
+      expect(hasMatch(/^Download all/)).toBe(false);
+      expect(hasMatch(/for reference only/i)).toBe(false);
+
+      await toggle();
+      expect(header().props.accessibilityState).toEqual({ expanded: true });
+      expect(has('Oregon') && has('Wyoming')).toBe(true);
+      expect(hasMatch(/^Download all/)).toBe(true);
+
+      await toggle();
+      expect(header().props.accessibilityState).toEqual({ expanded: false });
+      expect(has('Oregon') || has('Wyoming')).toBe(false);
+      expect(hasMatch(/^Download all/)).toBe(false);
+    });
+
+    it('says how many states are on the device, so a folded section still tells you something', async () => {
+      useHuntUnitStore.getState().markInstalled(OREGON, 1);
+      mockFilesOnDevice.add('OR');
+      await mount(ready(WYOMING, OREGON), false);
+      expect(has('1 of 2 on device')).toBe(true); // folded
+      await toggle();
+      expect(has('1 of 2 on device')).toBe(true); // open
+    });
+
+    it('a failed download is still reported while the list is folded away', async () => {
+      mockInstall = async () => {
+        throw new Error('boom');
+      };
+      await mount(ready(OREGON));
+      await press(renderer, 'Download');
+      await toggle();
+      expect(has('Oregon')).toBe(false);
+      expect(has('Oregon: boom')).toBe(true);
+    });
+  });
+
+  it('puts states already on the device first, and each group A-Z', async () => {
+    useHuntUnitStore.getState().markInstalled(WYOMING, 1);
+    mockFilesOnDevice.add('WY');
+    await mount(ready(WYOMING, OREGON, pack('AK', 'Alaska'), pack('WA', 'Washington')));
+    const order = texts().filter((t) => ['Alaska', 'Oregon', 'Washington', 'Wyoming'].includes(t));
+    expect(order).toEqual(['Wyoming', 'Alaska', 'Oregon', 'Washington']);
+  });
+
+  it('a state moves to the top of the list once it has been downloaded', async () => {
+    await mount(ready(pack('AK', 'Alaska'), OREGON));
+    const [, oregonButton] = pressablesNamed(renderer, 'Download'); // Alaska's card is first, Oregon's second
+    await act(async () => {
+      await oregonButton.props.onPress();
+    });
+    await settle();
+    const order = texts().filter((t) => t === 'Alaska' || t === 'Oregon');
+    expect(order).toEqual(['Oregon', 'Alaska']);
   });
 
   it('downloads a state on tap and records it, then offers Remove', async () => {
@@ -193,13 +257,12 @@ describe('HuntUnitsSection', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     act(() => renderer.unmount());
     await mount(ready());
-    expect(has('No other states have been published yet.')).toBe(true);
-    expect(has('Idaho')).toBe(true); // the built-in state is still there
+    expect(has('No states have been published yet.')).toBe(true);
   });
 
   it('shows a loading note while the list is being fetched', async () => {
     await mount({ status: 'loading' });
-    expect(has('Checking for more states…')).toBe(true);
+    expect(has('Checking for available states…')).toBe(true);
   });
 
   it('a nothing-to-download state offers no "Download all" (a single pending state has its own button)', async () => {

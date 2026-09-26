@@ -8,7 +8,7 @@ import { installRegionPack } from '../../downloads/regionPackInstaller';
 import { regionPackStatus, type RegionPackStatus } from '../../downloads/regionPackStatus';
 import type { ManifestState } from '../../downloads/useRegionManifest';
 import { isAbortError } from '../../packs/http';
-import type { RegionEntry, RegionPackFile } from '../../packs/regionPacks';
+import { layerPacks, type RegionEntry, type RegionLayerPacks } from '../../packs/regionPacks';
 import { regionPackKey, useRegionPackStore } from '../../state/useRegionPackStore';
 import { Text, useThemedStyles, type ThemeColors } from '../../theme';
 
@@ -38,6 +38,8 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
   const markInstalled = useRegionPackStore((s) => s.markInstalled);
 
   const [installing, setInstalling] = useState<{ key: string; fraction: number } | null>(null);
+  /** States the user opened or folded by hand; the rest follow whether anything from them is on the phone. */
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [errors, setErrors] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -48,7 +50,7 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
     const map = new Map<string, RegionPackStatus>();
     if (state.status !== 'ready') return map;
     for (const region of state.manifest.regions) {
-      for (const pack of region.packs) {
+      for (const pack of layerPacks(region)) {
         map.set(
           regionPackKey(region.id, pack.layer),
           regionPackStatus(region, pack, coverage, installedVersions[regionPackKey(region.id, pack.layer)])
@@ -59,7 +61,7 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
   }, [state, coverage, installedVersions]);
 
   const install = useCallback(
-    async (region: RegionEntry, packs: RegionPackFile[]) => {
+    async (region: RegionEntry, packs: RegionLayerPacks[]) => {
       const controller = new AbortController();
       abortRef.current = controller;
       setErrors([]);
@@ -69,13 +71,19 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
         const key = regionPackKey(region.id, pack.layer);
         setInstalling({ key, fraction: 0 });
         try {
-          await installRegionPack({
-            appDb,
-            region,
-            pack,
-            signal: controller.signal,
-            onProgress: (fraction) => setInstalling({ key, fraction }),
-          });
+          // A big layer is several zips; they install one after another and count as one download.
+          let doneBytes = 0;
+          for (const file of pack.files) {
+            await installRegionPack({
+              appDb,
+              region,
+              pack: file,
+              signal: controller.signal,
+              onProgress: (fraction) =>
+                setInstalling({ key, fraction: pack.bytes > 0 ? (doneBytes + fraction * file.bytes) / pack.bytes : fraction }),
+            });
+            doneBytes += file.bytes;
+          }
           markInstalled(region.id, pack.layer, pack.version);
         } catch (err) {
           if (!isAbortError(err)) failures.push(`${region.name} ${labels[pack.layer] ?? pack.layer}: ${errorMessage(err)}`);
@@ -91,10 +99,11 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Region packs</Text>
+      <Text style={styles.sectionTitle}>Whole states</Text>
       <Text style={styles.hint}>
-        One download per layer for a whole region — much faster than fetching it cell by cell, and it
-        keeps working offline. The overlay data below is for anywhere else.
+        Public land and private shading, forest roads, USFS trails, OpenStreetMap roads &amp; trails and points of
+        interest for a whole state, one download per layer — much quicker than picking squares, and it keeps working
+        offline. Tap a state to open it. Roads &amp; trails are the biggest.
       </Text>
 
       {state.status === 'loading' && <Text style={styles.note}>Checking for region packs…</Text>}
@@ -108,56 +117,72 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
       )}
 
       {state.status === 'ready' && state.manifest.regions.length === 0 && (
-        <Text style={styles.note}>No region packs have been published yet.</Text>
+        <Text style={styles.note}>No states are ready yet. Use Pick an area instead.</Text>
       )}
       {state.status === 'ready' &&
         state.manifest.regions.map((region) => {
-          const wanted = region.packs.filter((pack) => statuses.get(regionPackKey(region.id, pack.layer))?.state !== 'installed');
+          const groups = layerPacks(region);
+          const statusOf = (pack: RegionLayerPacks) => statuses.get(regionPackKey(region.id, pack.layer));
+          const wanted = groups.filter((pack) => statusOf(pack)?.state !== 'installed');
           const wantedBytes = wanted.reduce((sum, pack) => sum + pack.bytes, 0);
+          const onPhone = groups.filter((pack) => (statusOf(pack)?.state ?? 'none') !== 'none').length;
+          const busy = installing?.key.startsWith(`${region.id}:`) ?? false;
+          // A state opens by itself once anything from it is on the phone (or is being installed); the rest stay folded.
+          const open = expanded[region.id] ?? (onPhone > 0 || busy);
           return (
             <View key={region.id} style={styles.region}>
-              <View style={styles.regionHeader}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+                style={styles.regionHeader}
+                onPress={() => setExpanded((prev) => ({ ...prev, [region.id]: !open }))}
+              >
+                <Text style={styles.chevron}>{open ? '▾' : '▸'}</Text>
                 <Text style={styles.regionName}>{region.name}</Text>
-                {wanted.length > 1 && !installing && (
-                  <Pressable onPress={() => install(region, wanted)} hitSlop={8}>
-                    <Text style={styles.link}>Download all · {formatBytes(wantedBytes)}</Text>
-                  </Pressable>
-                )}
-              </View>
-              {region.packs.map((pack) => {
-                const key = regionPackKey(region.id, pack.layer);
-                const status = statuses.get(key);
-                const active = installing?.key === key;
-                return (
-                  <View key={key} style={styles.packRow}>
-                    <View style={styles.packText}>
-                      <Text style={styles.packLabel}>{labels[pack.layer] ?? pack.layer}</Text>
-                      <Text style={styles.note}>
-                        {status ? statusText(status) : ''}
-                        {status?.state === 'installed' ? '' : ` · ${formatBytes(pack.bytes)} download`}
-                      </Text>
-                    </View>
-                    {active ? (
-                      <View style={styles.activeColumn}>
-                        <Text style={styles.percent}>{Math.round((installing?.fraction ?? 0) * 100)}%</Text>
-                        <Pressable onPress={() => abortRef.current?.abort()} hitSlop={8}>
-                          <Text style={styles.cancel}>Cancel</Text>
-                        </Pressable>
+                <Text style={styles.regionSummary}>
+                  {onPhone === 0 ? formatBytes(wantedBytes) : `${onPhone} of ${groups.length} on phone`}
+                </Text>
+              </Pressable>
+              {open && wanted.length > 1 && !installing && (
+                <Pressable onPress={() => install(region, wanted)} hitSlop={8} style={styles.downloadAll}>
+                  <Text style={styles.link}>Download everything not on the phone · {formatBytes(wantedBytes)}</Text>
+                </Pressable>
+              )}
+              {open &&
+                groups.map((pack) => {
+                  const key = regionPackKey(region.id, pack.layer);
+                  const status = statusOf(pack);
+                  const active = installing?.key === key;
+                  return (
+                    <View key={key} style={styles.packRow}>
+                      <View style={styles.packText}>
+                        <Text style={styles.packLabel}>{labels[pack.layer] ?? pack.layer}</Text>
+                        <Text style={styles.note}>
+                          {status ? statusText(status) : ''}
+                          {status?.state === 'installed' ? '' : ` · ${formatBytes(pack.bytes)} download`}
+                        </Text>
                       </View>
-                    ) : status?.state === 'installed' ? (
-                      <Text style={styles.done}>Installed ✓</Text>
-                    ) : (
-                      <Pressable
-                        style={[styles.button, installing !== null && styles.buttonDisabled]}
-                        disabled={installing !== null}
-                        onPress={() => install(region, [pack])}
-                      >
-                        <Text style={styles.buttonText}>{buttonLabel(status)}</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                );
-              })}
+                      {active ? (
+                        <View style={styles.activeColumn}>
+                          <Text style={styles.percent}>{Math.round((installing?.fraction ?? 0) * 100)}%</Text>
+                          <Pressable onPress={() => abortRef.current?.abort()} hitSlop={8}>
+                            <Text style={styles.cancel}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      ) : status?.state === 'installed' ? (
+                        <Text style={styles.done}>Installed ✓</Text>
+                      ) : (
+                        <Pressable
+                          style={[styles.button, installing !== null && styles.buttonDisabled]}
+                          disabled={installing !== null}
+                          onPress={() => install(region, [pack])}
+                        >
+                          <Text style={styles.buttonText}>{buttonLabel(status)}</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
             </View>
           );
         })}
@@ -197,8 +222,11 @@ const makeStyles = (c: ThemeColors) =>
     hint: { color: c.textMuted, fontSize: 13 },
     note: { color: c.textMuted, fontSize: 12, marginTop: 2 },
     region: { gap: 6 },
-    regionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    regionName: { fontWeight: '600', fontSize: 15 },
+    regionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+    chevron: { width: 16, color: c.textMuted },
+    regionName: { flex: 1, fontWeight: '600', fontSize: 15 },
+    regionSummary: { color: c.textMuted, fontSize: 12 },
+    downloadAll: { paddingBottom: 2 },
     packRow: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -12,6 +12,8 @@ interface LayersPanelProps {
   bottomClearance: number;
   /** Opens the full Layers screen (opacity, POIs, offline maps, saved views, legends). */
   onOpenAdvanced: () => void;
+  /** Opens the Downloads screen — for overlays (hunting units) whose other regions are downloaded there. */
+  onOpenDownloads: () => void;
 }
 
 const GROUPS = groupedOverlays();
@@ -23,7 +25,7 @@ const GROUPS = groupedOverlays();
  * with its first section or whenever one of its layers is on. Everything finer-grained stays on the
  * full Layers screen.
  */
-export function LayersPanel({ top, bottomClearance, onOpenAdvanced }: LayersPanelProps) {
+export function LayersPanel({ top, bottomClearance, onOpenAdvanced, onOpenDownloads }: LayersPanelProps) {
   const styles = useThemedStyles(makeStyles);
   const { width, height } = useWindowDimensions();
   const baseMap = useLayersStore((s) => s.baseMap);
@@ -89,14 +91,21 @@ export function LayersPanel({ top, bottomClearance, onOpenAdvanced }: LayersPane
               </Pressable>
               {!isCollapsed &&
                 overlays.map((overlay) => (
-                  <View key={overlay.id} style={styles.overlayRow}>
-                    <Text style={styles.overlayLabel}>{overlay.label}</Text>
-                    {overlay.onlineOnly && <Text style={styles.onlineTag}>online</Text>}
-                    <Switch
-                      value={overlayVisibility[overlay.id] && !overlay.disabled}
-                      onValueChange={(visible) => setOverlayVisible(overlay.id, visible)}
-                      disabled={overlay.disabled}
-                    />
+                  <View key={overlay.id} style={styles.overlayItem}>
+                    <View style={styles.overlayRow}>
+                      <Text style={styles.overlayLabel}>{overlay.label}</Text>
+                      {overlay.onlineOnly && <Text style={styles.onlineTag}>online</Text>}
+                      <Switch
+                        value={overlayVisibility[overlay.id] && !overlay.disabled}
+                        onValueChange={(visible) => setOverlayVisible(overlay.id, visible)}
+                        disabled={overlay.disabled}
+                      />
+                    </View>
+                    {overlay.downloadsLink && (
+                      <Pressable accessibilityRole="link" style={styles.downloadsLink} onPress={onOpenDownloads}>
+                        <Text style={styles.downloadsLinkText}>{overlay.downloadsLink} →</Text>
+                      </Pressable>
+                    )}
                   </View>
                 ))}
             </View>
@@ -134,14 +143,10 @@ const makeStyles = (c: ThemeColors) =>
     baseMapButtonActive: { backgroundColor: c.primary },
     baseMapText: { fontWeight: '600', fontSize: 13 },
     baseMapTextActive: { color: c.onPrimary },
-    overlayRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingVertical: 4,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderColor: c.divider,
-    },
+    overlayItem: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: c.divider },
+    overlayRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+    downloadsLink: { paddingBottom: 8, alignSelf: 'flex-start' },
+    downloadsLinkText: { fontSize: 12, fontWeight: '600', color: c.primaryText },
     groupHeader: {
       flexDirection: 'row',
       alignItems: 'center',
