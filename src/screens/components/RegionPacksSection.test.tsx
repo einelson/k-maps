@@ -60,6 +60,8 @@ const texts = () => renderedTexts(renderer);
 const has = (text: string) => texts().includes(text);
 const hasMatch = (re: RegExp) => texts().some((t) => re.test(t));
 
+const onPickMapPictures = jest.fn();
+
 function mount(manifest: ManifestState, coverage: CoverageRow[] = []) {
   act(
     () =>
@@ -70,6 +72,7 @@ function mount(manifest: ManifestState, coverage: CoverageRow[] = []) {
           coverage={coverage}
           labels={LABELS}
           onChanged={onChanged}
+          onPickMapPictures={onPickMapPictures}
         />
       ))
   );
@@ -111,6 +114,18 @@ describe('RegionPacksSection', () => {
     expect(hasMatch(/1 of 2 on phone/)).toBe(true);
     // Wyoming has nothing on the phone, so it stays folded: its only layer row is not shown twice.
     expect(texts().filter((t) => t === LABELS.land)).toHaveLength(1);
+  });
+
+  it('links an open state to Pick an area, the only place offline map pictures can be saved', async () => {
+    mount(ready(montana, wyoming));
+    expect(hasMatch(/offline map pictures of/)).toBe(false); // folded: no link yet
+
+    await press(renderer, 'Montana');
+    expect(has('Also save offline map pictures of Montana →')).toBe(true);
+    expect(has('Also save offline map pictures of Wyoming →')).toBe(false);
+
+    await press(renderer, 'Also save offline map pictures of Montana →');
+    expect(onPickMapPictures).toHaveBeenCalledWith('montana');
   });
 
   it('a layer split into parts installs every part in order and counts as one install', async () => {

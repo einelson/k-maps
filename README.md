@@ -54,17 +54,26 @@ token they rely on; what's untested is how they look and behave on the phone.
   fine a state at a time, too much to ship in the app, which is why panning, Pick an area and region packs
   exist instead of one big download
 - **Downloads is three tabs, not one long scroll.** *Pick an area* (the map, what to save, a footer
-  that always shows the total, and the Download button at the right end of the header), *Ready-made* (region
-  packs and hunting units — the hunting-units list starts folded, with the states already on the phone first)
-  and *On this phone* (what's stored, free space, delete overlay data). A tap on the map picks a
-  **block of squares sized to the zoom** — 1 square from zoom 9 in, then 2×2, 4×4, 8×8, 16×16 as you
-  zoom out — always about a finger's width on screen; the grid it picks from is drawn on the map, tapping
-  a picked block again puts it back, and *Pick everything in view* picks the whole screen (at most 500
-  squares at once; Idaho is 329) (`src/downloads/blockSelect.ts`). Squares already on the phone are
-  skipped, so a big selection can be re-run after a hiccup without fetching everything again. The
+  that always shows the total, and the Download button at the right end of the header), *Ready-made* (a state's land
+  and trail data, and hunting units — the hunting-units list starts folded, with the states already on the phone first)
+  and *On this phone* (what's stored **split by state**, free space, delete overlay data a state or a layer at a time).
+  A tap on the map picks a **block of squares sized to the zoom** — 1 square from about zoom 7 in, then 2×2, 4×4, 8×8,
+  16×16 as you zoom out — always 70–140 dp (a comfortable fingertip) on screen; the grid it picks from is drawn on the
+  map, tapping a picked block again puts it back, and *Pick everything in view* picks the whole screen (at most 500
+  squares by hand; Idaho is 329) (`src/downloads/blockSelect.ts`). A **crosshair** marks the middle of the map and
+  outlines the block under it; the button at the bottom (*Pick this square* / *Pick these 4 squares* / *Pick the rest* /
+  *Remove this square*) acts on that block, so a square can be lined up precisely instead of tapped. Squares already on
+  the phone are skipped, so a big selection can be re-run after a hiccup without fetching everything again. The
   footer shows size and time before you start and says why the Download button is off (for example, the
   phone has no room); anything over 1 GB asks first, and live progress (Cancel, and which files failed
   and why) keeps running if you leave the screen (`src/downloads/startDownload.ts`)
+- **Whole state, with everything.** Ready-made packs only carry overlay data (land, forest roads, trails, OSM, POI) —
+  never offline map pictures. *Pick an area → Pick a whole state…* selects every square of a state (all 50, from the
+  bundled `assets/us/us-state-cells.json`; a state can go past the 500-square hand-picking cap) so the same layer choices
+  apply, map pictures included. When a state is picked whole and its ready-made pack is published, its overlay layers
+  install from the pack (a few zips) and only the map pictures are fetched square by square
+  (`planDownload`'s `region` jobs); anything else falls back to per-square fetching. Ready-made state cards link to
+  Pick an area with the state already picked ("Also save offline map pictures of …")
 - **Remembers how you left the app.** Base map, which layers are on and their opacity, name labels,
   offline-maps and load-as-I-pan switches, POI toggles, the active map filters and saved filter presets,
   saved views, the download choices (map pictures, overlay data, detail level) and where the map was

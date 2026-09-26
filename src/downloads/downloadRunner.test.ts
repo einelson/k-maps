@@ -1,7 +1,10 @@
-import type { DownloadJob } from './downloadPlan';
+import type { CellJob, DownloadJob } from './downloadPlan';
 import { runDownload, type RunJob, type RunReport } from './downloadRunner';
 
-const job = (n: number, layer: DownloadJob['layer'] = 'land'): DownloadJob => ({
+/** These tests only run per-area jobs; the runner treats every kind alike. */
+const cxOf = (j: DownloadJob) => (j.kind === 'region' ? -1 : j.cx);
+
+const job = (n: number, layer: DownloadJob['layer'] = 'land'): CellJob => ({
   kind: 'pack',
   layer,
   cx: n,
@@ -11,9 +14,9 @@ const job = (n: number, layer: DownloadJob['layer'] = 'land'): DownloadJob => ({
 function recorder() {
   const events: string[] = [];
   const report: RunReport = {
-    onJobStart: (j, i) => events.push(`start ${i}:${j.cx}`),
-    onJobProgress: (j, f) => events.push(`progress ${j.cx}:${f}`),
-    onJobDone: (j, failure) => events.push(`done ${j.cx}${failure ? ` failed(${failure.message})` : ''}`),
+    onJobStart: (j, i) => events.push(`start ${i}:${cxOf(j)}`),
+    onJobProgress: (j, f) => events.push(`progress ${cxOf(j)}:${f}`),
+    onJobDone: (j, failure) => events.push(`done ${cxOf(j)}${failure ? ` failed(${failure.message})` : ''}`),
   };
   return { events, report };
 }
@@ -32,7 +35,7 @@ describe('runDownload', () => {
   it('keeps going after a job fails, and remembers why', async () => {
     const { events, report } = recorder();
     const run: RunJob = async (j) => {
-      if (j.cx === 2) throw new Error('HTTP 503');
+      if (cxOf(j) === 2) throw new Error('HTTP 503');
     };
 
     const result = await runDownload([job(1), job(2), job(3)], run, report, new AbortController().signal);
@@ -56,7 +59,7 @@ describe('runDownload', () => {
     const controller = new AbortController();
     const { events, report } = recorder();
     const run: RunJob = async (j) => {
-      if (j.cx === 1) controller.abort();
+      if (cxOf(j) === 1) controller.abort();
     };
 
     const result = await runDownload([job(1), job(2)], run, report, controller.signal);

@@ -32,14 +32,20 @@ export const MAX_SELECTED_CELLS = 500;
 const WORLD_CELLS = 1 << CELL_ZOOM;
 
 /**
- * Cells per block side for a map zoom: 1 from about zoom 9, then doubling every zoom level out.
- *
- * At MapLibre zoom z a cell is 512 * 2^(z - 10) dp wide, so `floor(9.5 - z)` keeps a block between roughly
- * 180 and 360 dp on screen — a big, easy target — at every zoom from about 9.5 down to 5.
+ * How wide a block should look on screen, in dp: a comfortable finger target that still leaves several on a phone
+ * screen. (One z10 cell is 512 * 2^(zoom - 10) dp wide, at any latitude — it is a Web Mercator tile.)
+ */
+export const TARGET_BLOCK_DP = 96;
+
+/**
+ * Cells per block side for a map zoom: whichever power of two makes a block look closest to TARGET_BLOCK_DP,
+ * never smaller than a cell. So single squares are pickable from about zoom 7 (a square is ~70 dp there — this used
+ * to be zoom 9.5, where one square is as wide as the whole phone), and the block doubles every zoom level out.
  */
 export function blockSizeForZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) return 1;
-  const exponent = Math.floor(9.5 - zoom);
+  const cellDp = 512 * 2 ** (zoom - CELL_ZOOM);
+  const exponent = Math.round(Math.log2(TARGET_BLOCK_DP / cellDp));
   return 1 << Math.min(MAX_BLOCK_EXPONENT, Math.max(0, exponent));
 }
 
@@ -129,6 +135,19 @@ export function toggleBlock(
     return { kind: 'changed', cells: kept, added: 0, removed: selected.length - kept.length };
   }
   return addCells(selected, block, max);
+}
+
+/** How much of the block under `tap` is already selected — what a "pick this block" button says it will do. */
+export function blockPickState(
+  selected: readonly Cell[],
+  tap: Cell,
+  size: number,
+  eligible?: CellFilter
+): { total: number; picked: number } {
+  const { bx, by } = blockOf(tap, size);
+  const block = eligible ? cellsInBlock(bx, by, size).filter(eligible) : cellsInBlock(bx, by, size);
+  const have = new Set(selected.map((c) => keyOf(c.cx, c.cy)));
+  return { total: block.length, picked: block.filter((c) => have.has(keyOf(c.cx, c.cy))).length };
 }
 
 /** A view of more cells than this isn't listed to be filtered — the whole US is only ~15,000 cells. */

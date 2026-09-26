@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import type { ViewState } from '@maplibre/maplibre-react-native';
+import type { CameraRef, ViewState } from '@maplibre/maplibre-react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import type { CoverageRow } from '../../data/types';
 import {
+  blockOf,
+  blockPickState,
   blockRangeInBounds,
   blockSizeForZoom,
   MAX_SELECTED_CELLS,
@@ -20,21 +22,28 @@ import { estimateDownload, planDownload, tileBytesPerCell } from '../../download
 import { formatBytes, formatWait } from '../../downloads/formatBytes';
 import { freeDiskBytes } from '../../downloads/freeSpace';
 import { startDownload } from '../../downloads/startDownload';
+import { US_STATE_CELLS, viewFitting } from '../../downloads/stateCells';
+import type { ManifestState } from '../../downloads/useRegionManifest';
 import { formatArea } from '../../features/formatUnits';
+import { BlockCursorOverlay, type BlockCursor } from '../../map/BlockCursorOverlay';
 import { BlockGridOverlay, type BlockGridRange } from '../../map/BlockGridOverlay';
 import { CELL_STATE_COLORS, CellsOverlay, type CellOverlayEntry } from '../../map/CellsOverlay';
 import { MapScreenMap } from '../../map/MapView';
 import type { LayerId } from '../../downloads/types';
 import type { PackLayerId } from '../../packs/types';
+import type { UsState } from '../../packs/usStates';
 import { useDownloadRunStore } from '../../state/useDownloadRunStore';
 import { useDownloadStore } from '../../state/useDownloadStore';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { Text, useThemedStyles, type ThemeColors } from '../../theme';
 import { DownloadFooter } from './DownloadFooter';
 import { DownloadHeaderButton } from './DownloadHeaderButton';
+import { StatePickerSheet } from './StatePickerSheet';
 
 interface Props {
   coverage: CoverageRow[];
+  /** The published pack list (fetched once by the Downloads screen): a state picked whole installs its overlay data from its pack. */
+  manifest: ManifestState;
   reloadCoverage: () => Promise<void>;
   /** Where the map starts, so it stays where you left it when you switch tabs and back. */
   initialView: { center: [number, number]; zoom: number };
@@ -54,7 +63,7 @@ const CONFIRM_BYTES = 1_000_000_000;
  * shows the total. The Download button sits at the right end of the screen's header, so the picklist keeps the room. A tap picks a block of squares sized to the zoom (blockSelect.ts),
  * so zooming out picks a whole region in a few taps.
  */
-export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChange, onSeeReadyMade }: Props) {
+export function PickAreaTab({ coverage, manifest, reloadCoverage, initialView, onViewChange, onSeeReadyMade }: Props) {
   const appDb = useSQLiteContext();
   const styles = useThemedStyles(makeStyles);
   const units = useSettingsStore((s) => s.units);
@@ -72,9 +81,39 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
   const setMaxZoom = useDownloadStore((s) => s.setMaxZoom);
 
   const viewRef = useRef<ViewState | null>(null);
+  const cameraRef = useRef<CameraRef>(null);
+  const mapSize = useRef({ width: 360, height: 260 });
   const [blockSize, setBlockSize] = useState(() => blockSizeForZoom(initialView.zoom));
   const [grid, setGrid] = useState<BlockGridRange | null>(null);
+  /** The block under the crosshair in the middle of the map — what the "Pick" button acts on. */
+  const [cursor, setCursor] = useState<BlockCursor | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [stateSheetOpen, setStateSheetOpen] = useState(false);
+
+  // States whose every square is picked. Their squares don't count toward the cap on hand-picked squares.
+  const whole = useMemo(() => {
+    const states = US_STATE_CELLS.wholeStates(selectedCells);
+    const keys = new Set<string>();
+    for (const state of states) for (const { cx, cy } of US_STATE_CELLS.cellsOf(state.code)) keys.add(`${cx}:${cy}`);
+    return { states, cellCount: keys.size };
+  }, [selectedCells]);
+  const pickCap = MAX_SELECTED_CELLS + whole.cellCount;
+  const packRegions = useMemo(
+    () =>
+      manifest.status === 'ready'
+        ? manifest.manifest.regions.filter((region) => whole.states.some((state) => state.id === region.id))
+        : [],
+    [manifest, whole.states]
+  );
+  const packedIds = useMemo(
+    () =>
+      new Set(
+        manifest.status === 'ready'
+          ? manifest.manifest.regions.filter((region) => region.packs.length > 0).map((region) => region.id)
+          : []
+      ),
+    [manifest]
+  );
 
   // What a tap picks and where the grid is drawn follow the zoom; both change only when the view crosses a block
   // boundary or a zoom step, so ordinary panning doesn't re-render the screen.
@@ -84,6 +123,11 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
       onViewChange({ center: view.center, zoom: view.zoom });
       const size = blockSizeForZoom(view.zoom);
       setBlockSize(size);
+      const middle = lonLatToCell(view.center[0], view.center[1]);
+      if (Number.isFinite(middle.cx) && Number.isFinite(middle.cy)) {
+        const { bx, by } = blockOf(middle, size);
+        setCursor((prev) => (prev && prev.bx === bx && prev.by === by && prev.size === size ? prev : { bx, by, size }));
+      }
       const range = blockRangeInBounds(view.bounds, size);
       setGrid((prev) =>
         prev &&
@@ -101,20 +145,47 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
 
   function handleMapPress(lngLat: [number, number]) {
     const size = blockSizeForZoom(viewRef.current?.zoom ?? initialView.zoom);
-    const change = toggleBlock(selectedCells, lonLatToCell(lngLat[0], lngLat[1]), size, MAX_SELECTED_CELLS, isUsCell);
+    const change = toggleBlock(selectedCells, lonLatToCell(lngLat[0], lngLat[1]), size, pickCap, isUsCell);
     applyChange(change);
+  }
+
+  /** The button under the crosshair: picks (or puts back) the block the middle of the map is over. */
+  function handlePickCenter() {
+    if (!cursor) return;
+    const corner = { cx: cursor.bx * cursor.size, cy: cursor.by * cursor.size };
+    applyChange(toggleBlock(selectedCells, corner, cursor.size, pickCap, isUsCell));
   }
 
   function handleSelectView() {
     if (!viewRef.current) return;
-    applyChange(selectCellsInView(selectedCells, viewRef.current.bounds, MAX_SELECTED_CELLS, isUsCell));
+    applyChange(selectCellsInView(selectedCells, viewRef.current.bounds, pickCap, isUsCell));
+  }
+
+  function flyToState(code: string) {
+    const bounds = US_STATE_CELLS.boundsOf(code);
+    if (!bounds) return;
+    const { center, zoom } = viewFitting(bounds, mapSize.current);
+    cameraRef.current?.flyTo({ center, zoom, duration: 1200 });
+  }
+
+  /** Tapping a state in the sheet picks all of it and shows it; tapping one that is already picked puts it back. */
+  function handleToggleState(state: UsState) {
+    setStateSheetOpen(false);
+    setNotice(null);
+    if (whole.states.some((picked) => picked.code === state.code)) {
+      setSelectedCells(US_STATE_CELLS.removeState(selectedCells, state.code));
+      return;
+    }
+    setSelectedCells(US_STATE_CELLS.addState(selectedCells, state.code));
+    flyToState(state.code);
   }
 
   function applyChange(change: ReturnType<typeof toggleBlock>) {
     if (change.kind === 'too-many') {
       setNotice(
-        `That would be ${change.wouldBe} squares — the most at once is ${MAX_SELECTED_CELLS}. ` +
-          'Zoom in and pick a smaller area, or use Ready-made downloads for a whole state.'
+        `That would be ${change.wouldBe - whole.cellCount} squares${whole.cellCount > 0 ? ' besides the whole states' : ''}` +
+          ` — the most at once is ${MAX_SELECTED_CELLS}. ` +
+          'Zoom in and pick a smaller area, or pick a whole state instead.'
       );
       return;
     }
@@ -149,11 +220,24 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
         packLayers: selectedPackLayers,
         maxZoom,
         coverage,
+        regions: packRegions,
       }),
-    [selectedCells, selectedLayers, selectedPackLayers, maxZoom, coverage]
+    [selectedCells, selectedLayers, selectedPackLayers, maxZoom, coverage, packRegions]
   );
   const estimate = useMemo(() => estimateDownload(plan.jobs, maxZoom), [plan.jobs, maxZoom]);
   const areaKm2 = useMemo(() => selectionAreaKm2(selectedCells), [selectedCells]);
+  const cursorPick = useMemo(
+    () =>
+      cursor
+        ? blockPickState(
+            selectedCells,
+            { cx: cursor.bx * cursor.size, cy: cursor.by * cursor.size },
+            cursor.size,
+            isUsCell
+          )
+        : null,
+    [cursor, selectedCells]
+  );
   const toggleTile = (id: LayerId) =>
     setSelectedLayers(selectedLayers.includes(id) ? selectedLayers.filter((l) => l !== id) : [...selectedLayers, id]);
   const togglePack = (id: PackLayerId) =>
@@ -165,6 +249,9 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
   const blocked = (() => {
     if (selectedCells.length === 0) return 'Tap the map to pick an area first.';
     if (nothingChosen) return 'Choose what to save under step 2.';
+    if (selectedPackLayers.length > 0 && whole.states.length > 0 && manifest.status === 'loading') {
+      return 'Checking for ready-made state packs…';
+    }
     if (plan.jobs.length === 0) return 'Everything you picked is already on this phone.';
     const free = freeDiskBytes(); // a cheap read, only reached once there is something to download
     if (free !== null && estimate.bytes > free * FREE_SPACE_SHARE) {
@@ -180,6 +267,7 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
       tileLayers: selectedLayers,
       packLayers: selectedPackLayers,
       maxZoom,
+      regions: packRegions,
     });
   }
 
@@ -219,7 +307,7 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
 
   return (
     <View style={styles.container}>
-      <View style={styles.mapArea}>
+      <View style={styles.mapArea} onLayout={(e) => void (mapSize.current = e.nativeEvent.layout)}>
         <MapScreenMap
           // Taps here pick squares — public land must not swallow them by opening its info card.
           overlayPressEnabled={false}
@@ -227,10 +315,17 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
           onViewStateChange={handleView}
           initialView={initialView}
           scaleBarBottom={30}
+          cameraRef={cameraRef}
         >
           <BlockGridOverlay grid={grid} />
           <CellsOverlay cells={overlayCells} />
+          <BlockCursorOverlay cursor={cursor} />
         </MapScreenMap>
+
+        <View pointerEvents="none" style={styles.crosshair}>
+          <View style={[styles.crossBar, styles.crossAcross]} />
+          <View style={[styles.crossBar, styles.crossDown]} />
+        </View>
 
         <View pointerEvents="none" style={styles.hintPill}>
           <Text style={styles.hintPillTitle}>
@@ -244,6 +339,31 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
                 : 'Zoom out for bigger, in for smaller'}
           </Text>
         </View>
+
+        {cursor && cursorPick && (
+          <View pointerEvents="box-none" style={styles.pickBar}>
+            <Pressable
+              style={[
+                styles.pickButton,
+                cursorPick.total === 0 && styles.pickButtonOff,
+                cursorPick.total > 0 && cursorPick.picked === cursorPick.total && styles.pickButtonRemove,
+              ]}
+              onPress={handlePickCenter}
+              disabled={cursorPick.total === 0}
+              accessibilityRole="button"
+            >
+              <Text
+                style={
+                  cursorPick.total > 0 && cursorPick.picked === cursorPick.total
+                    ? styles.pickButtonRemoveText
+                    : styles.pickButtonText
+                }
+              >
+                {pickButtonLabel(cursorPick)}
+              </Text>
+            </Pressable>
+          </View>
+        )}
 
         <View style={styles.mapButtons}>
           <Pressable style={styles.mapButton} onPress={handleSelectView} accessibilityRole="button">
@@ -268,8 +388,9 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
         <Text style={styles.stepTitle}>1 · Pick the area</Text>
         {selectedCells.length === 0 ? (
           <Text style={styles.body}>
-            Tap the map to pick squares (each is about {units === 'imperial' ? '18 miles' : '30 km'} across). Zoom out
-            first to pick a whole region in a few taps. Need a whole state? Try{' '}
+            Tap the map to pick squares (each is about {units === 'imperial' ? '18 miles' : '30 km'} across), or pan
+            until the + is over one and press the Pick button. Zoom out first to pick a whole region in a few taps. Only
+            need land and trail data for a whole state? Try{' '}
             <Text style={styles.link} onPress={onSeeReadyMade}>
               Ready-made downloads
             </Text>
@@ -279,6 +400,17 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
           <Text style={styles.selection}>
             {selectedCells.length} square{selectedCells.length === 1 ? '' : 's'} picked · about{' '}
             {formatArea(areaKm2, units)}
+          </Text>
+        )}
+        <Pressable style={styles.stateButton} onPress={() => setStateSheetOpen(true)} accessibilityRole="button">
+          <Text style={styles.stateButtonText}>Pick a whole state…</Text>
+        </Pressable>
+        {whole.states.length > 0 && (
+          <Text style={styles.body}>
+            Whole state{whole.states.length === 1 ? '' : 's'}: {whole.states.map((state) => state.name).join(', ')}.
+            {plan.jobs.some((job) => job.kind === 'region')
+              ? ' Land and trail data installs from the ready-made pack, so it is quick; map pictures are saved square by square.'
+              : ''}
           </Text>
         )}
         {notice && <Text style={styles.warning}>{notice}</Text>}
@@ -353,6 +485,14 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
         )}
       </ScrollView>
 
+      <StatePickerSheet
+        visible={stateSheetOpen}
+        onClose={() => setStateSheetOpen(false)}
+        picked={new Set(whole.states.map((state) => state.code))}
+        packedIds={packedIds}
+        onToggle={handleToggleState}
+      />
+
       <DownloadFooter
         blocked={blocked}
         jobCount={plan.jobs.length}
@@ -364,6 +504,14 @@ export function PickAreaTab({ coverage, reloadCoverage, initialView, onViewChang
       />
     </View>
   );
+}
+
+/** What the Pick button under the crosshair says it will do. */
+function pickButtonLabel({ total, picked }: { total: number; picked: number }): string {
+  if (total === 0) return 'No US land here';
+  if (picked === total) return total === 1 ? 'Remove this square' : `Remove these ${total} squares`;
+  if (picked > 0) return 'Pick the rest';
+  return total === 1 ? 'Pick this square' : `Pick these ${total} squares`;
 }
 
 function LegendDot({ color, label }: { color: string; label: string }) {
@@ -406,7 +554,35 @@ const makeStyles = (c: ThemeColors) =>
     },
     hintPillTitle: { fontSize: 13, fontWeight: '700' },
     hintPillText: { fontSize: 11, color: c.textSecondary },
-    mapButtons: { position: 'absolute', right: 8, bottom: 24, alignItems: 'flex-end', gap: 6 },
+    crosshair: {
+      position: 'absolute',
+      top: '50%',
+      left: '50%',
+      width: 26,
+      height: 26,
+      marginLeft: -13,
+      marginTop: -13,
+    },
+    crossBar: { position: 'absolute', backgroundColor: '#111827', borderWidth: 0.75, borderColor: '#ffffff' },
+    crossAcross: { left: 0, right: 0, top: 11, height: 4 },
+    crossDown: { top: 0, bottom: 0, left: 11, width: 4 },
+    pickBar: { position: 'absolute', left: 0, right: 0, bottom: 10, alignItems: 'center' },
+    pickButton: {
+      backgroundColor: c.primary,
+      paddingHorizontal: 20,
+      paddingVertical: 11,
+      borderRadius: 24,
+      elevation: 4,
+      shadowColor: c.shadow,
+      shadowOpacity: 0.25,
+      shadowRadius: 5,
+      shadowOffset: { width: 0, height: 2 },
+    },
+    pickButtonRemove: { backgroundColor: c.surface, borderWidth: 1.5, borderColor: c.danger },
+    pickButtonOff: { backgroundColor: c.disabled },
+    pickButtonText: { color: c.onPrimary, fontWeight: '700', fontSize: 14 },
+    pickButtonRemoveText: { color: c.danger, fontWeight: '700', fontSize: 14 },
+    mapButtons: { position: 'absolute', right: 8, bottom: 64, alignItems: 'flex-end', gap: 6 },
     mapButton: {
       backgroundColor: c.surface,
       paddingHorizontal: 12,
@@ -427,6 +603,14 @@ const makeStyles = (c: ThemeColors) =>
     body: { fontSize: 13, color: c.textSecondary, lineHeight: 19 },
     link: { color: c.primaryText, fontWeight: '600' },
     selection: { fontSize: 15, fontWeight: '600' },
+    stateButton: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 18,
+      backgroundColor: c.chip,
+    },
+    stateButtonText: { fontWeight: '600', fontSize: 13, color: c.primaryText },
     warning: { fontSize: 13, color: c.danger },
     legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
     legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },

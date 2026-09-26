@@ -431,7 +431,7 @@ incompatible change):
 cell wholly inside, wholly outside, or on a coast/border of the US, with the US part of edge cells; the pack fetchers
 take it in their context (`PackContext.us`, `src/packs/usCoverage.ts`, `usFilter.ts`): outside cells are skipped, the
 "likely private" inference starts from US land instead of the whole cell rectangle, and edge-cell OSM lines/POI points
-outside the US are dropped. Each state's cells come from the same data (`tools/data/us-state-cells.json`), so a state
+outside the US are dropped. Each state's cells come from the same data (`assets/us/us-state-cells.json`), so a state
 is exactly the cells its outline touches. Land, MVUM and trails are fetched per cell (`tools/build_all_states.sh`);
 OSM roads and POI pins come from Geofabrik state extracts (`tools/osm_cells.py`, `tools/finalize_osm_cells.mjs`)
 because Overpass takes minutes per cell. Manifest format 2 lets a layer be split into ~40 MB parts, each listing its

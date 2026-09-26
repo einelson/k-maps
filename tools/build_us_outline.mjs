@@ -11,7 +11,8 @@
  *                                   inside the US, and for cells that are only partly inside — coast, Canada, Mexico —
  *                                   the US part. The land pack uses it so "likely private" is never drawn on the ocean
  *                                   or on Canada, and the app never fetches a cell that holds no US land.
- *   tools/data/us-state-cells.json  the z10 cells each state touches, for tools/regionCells.mjs (pack builds)
+ *   assets/us/us-state-cells.json   the z10 cells each state touches: tools/regionCells.mjs (pack builds) and the app
+ *                                   itself (src/downloads/stateCells.ts — pick or list a whole state) read it
  */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -24,7 +25,7 @@ import { buildDir } from './packManifest.mjs';
 const repoRoot = path.join(import.meta.dirname, '..');
 const CACHE_FILE = path.join(buildDir, 'cache', 'us-states-500k.json');
 const CELLS_OUT = path.join(repoRoot, 'assets', 'us', 'us-cells.json');
-const STATE_CELLS_OUT = path.join(repoRoot, 'tools', 'data', 'us-state-cells.json');
+const STATE_CELLS_OUT = path.join(repoRoot, 'assets', 'us', 'us-state-cells.json');
 
 const SERVICE =
   'https://tigerweb.geo.census.gov/arcgis/rest/services/Generalized_ACS2023/State_County/MapServer/7/query';

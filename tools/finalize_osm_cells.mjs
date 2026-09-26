@@ -27,7 +27,7 @@ const outDir = path.join(buildDir, 'cache', 'cells');
 const LAYERS = ['osm', 'poi'];
 
 const us = createUsCoverage(JSON.parse(await readFile(path.join(repoRoot, 'assets', 'us', 'us-cells.json'), 'utf8')));
-const stateCells = JSON.parse(await readFile(path.join(repoRoot, 'tools', 'data', 'us-state-cells.json'), 'utf8'));
+const stateCells = JSON.parse(await readFile(path.join(repoRoot, 'assets', 'us', 'us-state-cells.json'), 'utf8'));
 
 const requested = process.argv.slice(2);
 const regionIds = requested.length ? requested : Object.keys(REGIONS);

@@ -6,6 +6,9 @@ import type { CoverageRow } from '../../data/types';
 import { lonLatToCell } from '../../downloads/cells';
 import { US_COVERAGE } from '../../downloads/usCells';
 import { startDownload } from '../../downloads/startDownload';
+import { US_STATE_CELLS } from '../../downloads/stateCells';
+import type { ManifestState } from '../../downloads/useRegionManifest';
+import type { RegionEntry } from '../../packs/regionPacks';
 import { useDownloadRunStore } from '../../state/useDownloadRunStore';
 import { useDownloadStore } from '../../state/useDownloadStore';
 import { useSettingsStore } from '../../state/useSettingsStore';
@@ -22,9 +25,11 @@ type MapProps = {
     bounds: [number, number, number, number];
   }) => void;
   initialView: { center: [number, number]; zoom: number };
+  cameraRef: { current: unknown };
 };
 let mapProps: MapProps;
 let overlayCells: { cx: number; cy: number; state: string }[] = [];
+let cursorBlock: { bx: number; by: number; size: number } | null = null;
 let mockFreeBytes: number | null = 500_000_000_000;
 
 jest.mock('../../map/MapView', () => ({
@@ -34,6 +39,12 @@ jest.mock('../../map/MapView', () => ({
   },
 }));
 jest.mock('../../map/BlockGridOverlay', () => ({ BlockGridOverlay: () => null }));
+jest.mock('../../map/BlockCursorOverlay', () => ({
+  BlockCursorOverlay: ({ cursor }: { cursor: typeof cursorBlock }) => {
+    cursorBlock = cursor;
+    return null;
+  },
+}));
 jest.mock('../../map/CellsOverlay', () => ({
   CELL_STATE_COLORS: { selected: '#0a0', complete: '#00a', partial: '#fa0' },
   CellsOverlay: ({ cells }: { cells: typeof overlayCells }) => {
@@ -86,12 +97,24 @@ const row = (
   updated_at: 0,
 });
 
-function mount(coverage: CoverageRow[] = [], zoom = 10) {
+const ready = (regions: RegionEntry[] = []): ManifestState => ({
+  status: 'ready',
+  manifest: { format: 2, regions, huntUnits: [] },
+});
+const idahoRegion = (layers: RegionEntry['packs'][number]['layer'][] = ['land']): RegionEntry => ({
+  id: 'idaho',
+  name: 'Idaho',
+  cells: US_STATE_CELLS.cellsOf('ID').map(({ cx, cy }): [number, number] => [cx, cy]),
+  packs: layers.map((layer) => ({ layer, file: `idaho-${layer}.zip`, bytes: 5_000_000, version: 'v1' })),
+});
+
+function mount(coverage: CoverageRow[] = [], zoom = 10, manifest: ManifestState = ready()) {
   act(
     () =>
       void (renderer = create(
         <PickAreaTab
           coverage={coverage}
+          manifest={manifest}
           reloadCoverage={reloadCoverage}
           initialView={{ center: BOISE, zoom }}
           onViewChange={onViewChange}
@@ -137,8 +160,8 @@ describe('PickAreaTab: picking squares', () => {
   });
 
   it('opens the map where it was told to', () => {
-    mount([], 8.2);
-    expect(mapProps.initialView).toEqual({ center: BOISE, zoom: 8.2 });
+    mount([], 6.6);
+    expect(mapProps.initialView).toEqual({ center: BOISE, zoom: 6.6 });
     expect(has('Each tap picks 2 × 2 squares')).toBe(true);
   });
 
@@ -154,25 +177,33 @@ describe('PickAreaTab: picking squares', () => {
   it('zooming out makes each tap pick more: 2 x 2, then 4 x 4, then 8 x 8 squares', () => {
     mount();
 
-    zoomTo(8.2);
+    zoomTo(6.6);
     expect(has('Each tap picks 2 × 2 squares')).toBe(true);
     tap();
     expect(selectedCount()).toBe(4);
 
-    zoomTo(7.2);
+    zoomTo(5.6);
     expect(has('Each tap picks 4 × 4 squares')).toBe(true);
     tap([-112, 46]);
     expect(selectedCount()).toBe(4 + 16);
 
-    zoomTo(6.2);
+    zoomTo(4.6);
     expect(has('Each tap picks 8 × 8 squares')).toBe(true);
     tap([-105, 40]);
     expect(selectedCount()).toBe(4 + 16 + 64);
   });
 
+  it('picks single squares from zoom 7 — no more zooming in until one square fills the phone', () => {
+    mount([], 7.3);
+    zoomTo(7.3);
+    expect(has('Each tap picks 1 square')).toBe(true);
+    tap();
+    expect(selectedCount()).toBe(1);
+  });
+
   it('tapping a picked block again puts it back, so a mis-tap is one tap to undo', () => {
     mount();
-    zoomTo(7.2);
+    zoomTo(5.6);
     tap();
     expect(selectedCount()).toBe(16);
 
@@ -205,7 +236,7 @@ describe('PickAreaTab: picking squares', () => {
 
   it('a block over a coast picks only its land squares', () => {
     mount();
-    zoomTo(6.2);
+    zoomTo(4.6);
 
     tap([-124, 41]); // an 8 x 8 block straddling the California / Oregon coast
     expect(selectedCount()).toBeGreaterThan(0);
@@ -226,7 +257,7 @@ describe('PickAreaTab: picking squares', () => {
 
   it('"Pick everything in view" picks every square on screen at once', () => {
     mount();
-    zoomTo(8.2);
+    zoomTo(6.6);
 
     act(() => pressableWith(renderer, 'Pick everything in view').props.onPress());
 
@@ -236,7 +267,7 @@ describe('PickAreaTab: picking squares', () => {
 
   it('refuses a pick that is too big, says why and how to do it instead, and keeps what was picked', () => {
     mount();
-    zoomTo(5.2);
+    zoomTo(3.6);
     tap([-120, 45]); // a 16 x 16 block: 256 squares
     expect(selectedCount()).toBe(256);
 
@@ -244,12 +275,12 @@ describe('PickAreaTab: picking squares', () => {
 
     expect(selectedCount()).toBe(256);
     expect(hasMatch(/the most at once is 500/)).toBe(true);
-    expect(hasMatch(/Ready-made downloads/)).toBe(true);
+    expect(hasMatch(/pick a whole state instead/)).toBe(true);
   });
 
   it('Clear empties the picks and the warning', () => {
     mount();
-    zoomTo(5.2);
+    zoomTo(3.6);
     tap([-120, 45]);
     tap([-100, 40]);
 
@@ -386,6 +417,7 @@ describe('PickAreaTab: starting a download', () => {
         tileLayers: ['topo'],
         packLayers: ['land'],
         maxZoom: 16,
+        regions: [],
       })
     );
   });
@@ -394,7 +426,7 @@ describe('PickAreaTab: starting a download', () => {
     let buttons: AlertButton[] | undefined;
     jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, b) => void (buttons = b));
     mount();
-    zoomTo(7.2);
+    zoomTo(5.6);
     tap(); // 16 squares of topo at maximum detail: well over a gigabyte
 
     act(() => headerButton().props.onPress());
@@ -425,3 +457,206 @@ describe('PickAreaTab: starting a download', () => {
     expect(has('1 already on this phone is skipped.')).toBe(true);
   });
 });
+
+describe('PickAreaTab: the crosshair and its Pick button', () => {
+  const pickButton = (label: string) => pressableWith(renderer, label);
+
+  it('has no button until the map has said where it is looking', () => {
+    mount();
+    expect(hasMatch(/^Pick (this|these)/)).toBe(false);
+  });
+
+  it('picks the square under the middle of the map, and the label says what it will do', () => {
+    mount();
+    zoomTo(10);
+    expect(cursorBlock).toEqual({ ...blockAtBoise(1), size: 1 });
+
+    act(() => pickButton('Pick this square').props.onPress());
+    expect(store.getState().selectedCells).toEqual([lonLatToCell(...BOISE)]);
+
+    expect(has('Remove this square')).toBe(true);
+    act(() => pickButton('Remove this square').props.onPress());
+    expect(selectedCount()).toBe(0);
+  });
+
+  it('picks a whole block when zoomed out, and counts the squares it will pick', () => {
+    mount();
+    zoomTo(6.6);
+
+    expect(has('Pick these 4 squares')).toBe(true);
+    act(() => pickButton('Pick these 4 squares').props.onPress());
+    expect(selectedCount()).toBe(4);
+    expect(has('Remove these 4 squares')).toBe(true);
+  });
+
+  it('follows the map: panning to another block moves the crosshair’s block', () => {
+    mount();
+    zoomTo(10);
+    const first = cursorBlock;
+    zoomTo(10, [-112, 46]);
+    expect(cursorBlock).not.toEqual(first);
+    expect(cursorBlock?.size).toBe(1);
+  });
+
+  it('offers to finish a block that is only partly picked', () => {
+    mount();
+    zoomTo(6.6);
+    tap();
+    act(() => store.getState().setSelectedCells(store.getState().selectedCells.slice(0, 2)));
+
+    expect(has('Pick the rest')).toBe(true);
+    act(() => pickButton('Pick the rest').props.onPress());
+    expect(selectedCount()).toBe(4);
+  });
+
+  it('is off over the ocean, and says so', () => {
+    mount();
+    zoomTo(10, [-128.5, 40.5]);
+
+    expect(has('No US land here')).toBe(true);
+    expect(pickButton('No US land here').props.disabled).toBe(true);
+  });
+});
+
+describe('PickAreaTab: picking a whole state', () => {
+  const openStates = () => act(() => pressableWith(renderer, 'Pick a whole state…').props.onPress());
+  const idahoCells = US_STATE_CELLS.cellsOf('ID');
+
+  it('offers the states in a list', () => {
+    mount();
+    openStates();
+    expect(has('Idaho')).toBe(true);
+    expect(has('Wyoming')).toBe(true);
+    expect(has(`${idahoCells.length} squares`)).toBe(true);
+  });
+
+  it('picks every square of the state and flies the map to it', () => {
+    mount();
+    const flyTo = jest.fn();
+    mapProps.cameraRef.current = { flyTo };
+    openStates();
+
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+
+    expect(selectedCount()).toBe(idahoCells.length);
+    expect(flyTo).toHaveBeenCalledWith(
+      expect.objectContaining({ center: expect.any(Array), zoom: expect.any(Number) })
+    );
+    expect(hasMatch(/^Whole state: Idaho\./)).toBe(true);
+    expect(hasMatch(new RegExp(`^${idahoCells.length} squares picked · about `))).toBe(true);
+  });
+
+  it('a state picked whole is added to what was already picked, not swapped for it', () => {
+    mount();
+    tap([-120, 47]); // somewhere in Washington
+    const before = selectedCount();
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    expect(selectedCount()).toBeGreaterThan(idahoCells.length);
+    expect(selectedCount()).toBeLessThanOrEqual(before + idahoCells.length);
+  });
+
+  it('tapping a picked state in the list puts it back', () => {
+    mount();
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    expect(has('Picked ✓')).toBe(false); // the sheet closed
+
+    openStates();
+    expect(has('Picked ✓')).toBe(true);
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    expect(selectedCount()).toBe(0);
+  });
+
+  it('lets a state through however big it is — Alaska is thousands of squares — where hand-picking stops at 500', () => {
+    mount();
+    openStates();
+    act(() => pressableWith(renderer, 'Alaska').props.onPress());
+    expect(selectedCount()).toBe(US_STATE_CELLS.cellsOf('AK').length);
+    expect(selectedCount()).toBeGreaterThan(500);
+  });
+
+  it('does not count a picked state against the cap on squares picked by hand', () => {
+    mount();
+    openStates();
+    act(() => pressableWith(renderer, 'Texas').props.onPress());
+    const texas = selectedCount();
+
+    tap([-116.2, 43.6]); // a single square in Idaho
+    expect(selectedCount()).toBe(texas + 1);
+    expect(hasMatch(/the most at once/)).toBe(false);
+  });
+
+  it('still refuses hand-picking past 500 squares on top of a whole state', () => {
+    mount();
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    zoomTo(3.6);
+    tap([-100, 40]); // 256 squares: fine
+    tap([-90, 40]); // another 256: past 500 beside the state
+    expect(hasMatch(/besides the whole states — the most at once is 500/)).toBe(true);
+  });
+
+  it('says when the state is there in the list because the ready-made pack has its land and trail data', () => {
+    mount([], 10, ready([idahoRegion()]));
+    openStates();
+    expect(has(`${idahoCells.length} squares · ready-made land & trail data`)).toBe(true);
+  });
+
+  it('downloads the state’s land data from its ready-made pack, map pictures square by square', () => {
+    const region = idahoRegion(['land']);
+    mount([], 10, ready([region]));
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+
+    expect(hasMatch(/installs from the ready-made pack/)).toBe(true);
+    // A whole state of topo maps is well over a gigabyte, so it asks first.
+    let buttons: AlertButton[] | undefined;
+    jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, b) => void (buttons = b));
+    act(() => headerButton().props.onPress());
+    act(() => buttons?.find((b) => b.text === 'Download')?.onPress?.());
+
+    expect(startDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ regions: [region], packLayers: ['land'], tileLayers: ['topo'] })
+    );
+  });
+
+  it('does not pass a pack for a state that is only partly picked', () => {
+    mount([], 10, ready([idahoRegion()]));
+    tap([-116.2, 43.6]);
+    act(() => headerButton().props.onPress());
+    expect(startDownload).toHaveBeenCalledWith(expect.objectContaining({ regions: [] }));
+  });
+
+  it('without a published pack the state is fetched square by square, and the screen does not claim otherwise', () => {
+    mount([], 10, ready([]));
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    expect(hasMatch(/^Whole state: Idaho\.$/)).toBe(true);
+    expect(hasMatch(/installs from the ready-made pack/)).toBe(false);
+  });
+
+  it('waits a moment while the pack list is still loading, then lets it start', () => {
+    mount([], 10, { status: 'loading' });
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    expect(has('Checking for ready-made state packs…')).toBe(true);
+    expect(headerButton().props.disabled).toBe(true);
+  });
+
+  it('does not wait for the pack list when only map pictures are being saved', () => {
+    mount([], 10, { status: 'loading' });
+    act(() => {
+      store.setState({ selectedPackLayers: [] });
+    });
+    openStates();
+    act(() => pressableWith(renderer, 'Idaho').props.onPress());
+    expect(has('Checking for ready-made state packs…')).toBe(false);
+  });
+});
+
+/** The block-grid coordinates of the block Boise is in, at a block size. */
+function blockAtBoise(size: number) {
+  const { cx, cy } = lonLatToCell(...BOISE);
+  return { bx: Math.floor(cx / size), by: Math.floor(cy / size) };
+}

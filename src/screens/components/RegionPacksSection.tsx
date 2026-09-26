@@ -4,7 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import type { CoverageRow } from '../../data/types';
 import { formatBytes } from '../../downloads/formatBytes';
-import { installRegionPack } from '../../downloads/regionPackInstaller';
+import { installRegionLayer } from '../../downloads/regionLayerInstaller';
 import { regionPackStatus, type RegionPackStatus } from '../../downloads/regionPackStatus';
 import type { ManifestState } from '../../downloads/useRegionManifest';
 import { isAbortError } from '../../packs/http';
@@ -22,6 +22,8 @@ interface Props {
   labels: Record<string, string>;
   /** Called after any install (or cancel) so the screen reloads coverage and the map re-reads its cells. */
   onChanged: () => void | Promise<void>;
+  /** Opens Pick an area with this whole state picked — the only place offline map pictures can be saved. */
+  onPickMapPictures?: (regionId: string) => void;
 }
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -31,7 +33,7 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
  * download per layer, from the packs published by tools/build_region_pack.mjs. Far quicker than fetching a
  * region cell by cell from the public services, and it works for regions too large to bundle in the app.
  */
-export function RegionPacksSection({ manifest: state, onRetry, coverage, labels, onChanged }: Props) {
+export function RegionPacksSection({ manifest: state, onRetry, coverage, labels, onChanged, onPickMapPictures }: Props) {
   const appDb = useSQLiteContext();
   const styles = useThemedStyles(makeStyles);
   const installedVersions = useRegionPackStore((s) => s.installed);
@@ -72,18 +74,13 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
         setInstalling({ key, fraction: 0 });
         try {
           // A big layer is several zips; they install one after another and count as one download.
-          let doneBytes = 0;
-          for (const file of pack.files) {
-            await installRegionPack({
-              appDb,
-              region,
-              pack: file,
-              signal: controller.signal,
-              onProgress: (fraction) =>
-                setInstalling({ key, fraction: pack.bytes > 0 ? (doneBytes + fraction * file.bytes) / pack.bytes : fraction }),
-            });
-            doneBytes += file.bytes;
-          }
+          await installRegionLayer({
+            appDb,
+            region,
+            packs: pack,
+            signal: controller.signal,
+            onProgress: (fraction) => setInstalling({ key, fraction }),
+          });
           markInstalled(region.id, pack.layer, pack.version);
         } catch (err) {
           if (!isAbortError(err)) failures.push(`${region.name} ${labels[pack.layer] ?? pack.layer}: ${errorMessage(err)}`);
@@ -146,6 +143,11 @@ export function RegionPacksSection({ manifest: state, onRetry, coverage, labels,
               {open && wanted.length > 1 && !installing && (
                 <Pressable onPress={() => install(region, wanted)} hitSlop={8} style={styles.downloadAll}>
                   <Text style={styles.link}>Download everything not on the phone · {formatBytes(wantedBytes)}</Text>
+                </Pressable>
+              )}
+              {open && onPickMapPictures && (
+                <Pressable onPress={() => onPickMapPictures(region.id)} hitSlop={8} style={styles.downloadAll}>
+                  <Text style={styles.link}>Also save offline map pictures of {region.name} →</Text>
                 </Pressable>
               )}
               {open &&

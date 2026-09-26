@@ -106,6 +106,28 @@ export async function deletePackCellData(
   await deleteCoverage(appDb, layer, cx, cy);
 }
 
+/** Cells removed per database transaction (and per breath handed back to the UI thread). */
+const DELETE_BATCH_SIZE = 50;
+
+/**
+ * Deletes a list of cells of one layer — a state's worth is hundreds — in batches, so the screen stays responsive
+ * and a failure part-way leaves files and rows consistent (each batch deletes the files, then their rows).
+ */
+export async function deletePackCells(
+  appDb: SQLiteDatabase,
+  layer: PackLayerId,
+  cells: readonly { cx: number; cy: number }[]
+): Promise<void> {
+  for (let start = 0; start < cells.length; start += DELETE_BATCH_SIZE) {
+    const batch = cells.slice(start, start + DELETE_BATCH_SIZE);
+    for (const { cx, cy } of batch) deletePackCell(layer, cx, cy);
+    await appDb.withTransactionAsync(async () => {
+      for (const { cx, cy } of batch) await deleteCoverage(appDb, layer, cx, cy);
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 /** Deletes every downloaded file of a pack layer and all of its coverage rows (bundled data is unaffected). */
 export async function deletePackData(appDb: SQLiteDatabase, layer: PackLayerId): Promise<void> {
   deletePackLayer(layer);

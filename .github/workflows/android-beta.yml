@@ -1,0 +1,124 @@
+# Builds the Android beta APK and publishes it as a GitHub pre-release, so testers can download it from the
+# repo's Releases page — no store, no account, no cable.
+#
+#   git tag v1.0.0-beta.2 && git push origin v1.0.0-beta.2      # any tag starting with "v"
+#
+# or, for a tag that already exists (say the first run failed), Actions -> "Android beta release" -> Run workflow.
+#
+# The APK is arm64-v8a only (every phone from the last decade; not an x86 emulator) and signed with the debug key the
+# Expo template ships — fine for sideloading, not for the Play Store. Region data is not in the APK: the app fetches it
+# from the repo's rolling `data` release, which this workflow never touches.
+name: Android beta release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish, e.g. v1.0.0-beta.2'
+        required: true
+
+permissions:
+  contents: write # create the release and upload the APK
+
+concurrency:
+  group: android-beta-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  EXPO_NO_TELEMETRY: '1'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Nothing ships that doesn't typecheck, lint and pass its tests.
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npx expo lint
+      - name: Test
+        run: npx jest --ci
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21 # Gradle/AGP here don't support newer JDKs; 17 or 21 both work
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The tag is the version people see ("1.0.0-beta.2"); the run number is the always-rising versionCode Android
+      # needs to accept one build over the last. Done here, on the CI checkout only — app.json in the repo is untouched.
+      - name: Stamp the version
+        run: |
+          version="${TAG#v}"
+          jq --arg version "$version" --argjson code "$GITHUB_RUN_NUMBER" \
+            '.expo.version = $version | .expo.android.versionCode = $code' app.json > app.stamped.json
+          mv app.stamped.json app.json
+          echo "Building $version (versionCode $GITHUB_RUN_NUMBER)"
+
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build the release APK
+        working-directory: android
+        env:
+          NODE_ENV: production
+        run: |
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+
+      - name: Name the APK
+        run: |
+          apk="K-Maps-${TAG}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
+          echo "APK=$apk" >> "$GITHUB_ENV"
+          ls -l "$apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK }}
+          path: ${{ env.APK }}
+          retention-days: 14
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          **K-Maps beta** — offline outdoor maps for the United States.
+
+          ### Install (Android)
+          1. Download the `.apk` below on your phone.
+          2. Open it. If Android asks, allow your browser / Files app to **install unknown apps**.
+          3. If Play Protect says it doesn't recognise the developer, choose **Install anyway** — this beta isn't on the Play Store.
+
+          Later betas install over this one and keep your pins, tracks and downloads.
+
+          Requires Android 7 or newer on a 64-bit phone (any phone from the last several years). Land, forest-road and
+          trail data for each state is downloaded from inside the app (Downloads → Ready-made, or Pick an area), so the
+          first launch is small.
+          NOTES
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --notes-file notes.md
+          else
+            gh release create "$TAG" --prerelease --verify-tag --title "K-Maps $TAG" --notes-file notes.md
+          fi
+          gh release upload "$TAG" "$APK" --clobber
+          echo "Download: https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK}" >> "$GITHUB_STEP_SUMMARY"

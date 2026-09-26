@@ -4,7 +4,7 @@ import { fetchTrailsPack } from '../packs/trails.ts';
 import { deletePackCell, deletePackLayer, writePackCell } from '../packs/packStorage.ts';
 import { BUNDLED_CELL_RECT } from '../packs/region.ts';
 import { cellBounds } from './cells';
-import { deletePackCellData, deletePackData, downloadPackCell } from './packDownloader';
+import { deletePackCellData, deletePackCells, deletePackData, downloadPackCell } from './packDownloader';
 
 const mockCoverage = new Map<string, any>();
 
@@ -29,7 +29,10 @@ jest.mock('../packs/osm.ts', () => ({ fetchOsmRoadsPack: jest.fn() }));
 jest.mock('../packs/trails.ts', () => ({ fetchTrailsPack: jest.fn() }));
 
 
-const db: any = { runAsync: jest.fn(async () => undefined) };
+const db: any = {
+  runAsync: jest.fn(async () => undefined),
+  withTransactionAsync: jest.fn(async (fn: () => Promise<void>) => fn()),
+};
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const OUTSIDE = { cx: 100, cy: 100 };
 
@@ -141,5 +144,38 @@ describe('deletePackData', () => {
     await deletePackCellData(db, 'osm', 5, 6);
     expect(deletePackCell).toHaveBeenCalledWith('osm', 5, 6);
     expect(mockCoverage.has('osm/5/6')).toBe(false);
+  });
+});
+
+describe('deletePackCells', () => {
+  it('removes each cell’s file and coverage row, and only those cells', async () => {
+    mockCoverage.set('land/1/1', { status: 'complete' });
+    mockCoverage.set('land/2/1', { status: 'complete' });
+    mockCoverage.set('land/3/1', { status: 'complete' });
+    mockCoverage.set('mvum/1/1', { status: 'complete' });
+
+    await deletePackCells(db, 'land', [
+      { cx: 1, cy: 1 },
+      { cx: 2, cy: 1 },
+    ]);
+
+    expect(deletePackCell).toHaveBeenCalledTimes(2);
+    expect(deletePackCell).toHaveBeenCalledWith('land', 1, 1);
+    expect(mockCoverage.has('land/1/1')).toBe(false);
+    expect(mockCoverage.has('land/2/1')).toBe(false);
+    expect(mockCoverage.has('land/3/1')).toBe(true);
+    expect(mockCoverage.has('mvum/1/1')).toBe(true);
+  });
+
+  it('works through a long list in several transactions', async () => {
+    const cells = Array.from({ length: 120 }, (_, i) => ({ cx: i, cy: 0 }));
+    await deletePackCells(db, 'osm', cells);
+    expect(deletePackCell).toHaveBeenCalledTimes(120);
+    expect(db.withTransactionAsync).toHaveBeenCalledTimes(3);
+  });
+
+  it('does nothing for an empty list', async () => {
+    await deletePackCells(db, 'osm', []);
+    expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 });

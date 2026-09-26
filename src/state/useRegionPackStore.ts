@@ -10,6 +10,8 @@ interface RegionPackState {
   markInstalled: (regionId: string, layer: PackLayerId, version: string) => void;
   /** Forget every region's install of a layer — its data was deleted from Downloads. */
   forgetLayer: (layer: PackLayerId) => void;
+  /** Forget one region's install of a layer — that state's copy was deleted from Downloads. */
+  forgetRegionLayer: (regionId: string, layer: PackLayerId) => void;
 }
 
 export const regionPackKey = (regionId: string, layer: PackLayerId) => `${regionId}:${layer}`;
@@ -20,6 +22,12 @@ export const useRegionPackStore = create<RegionPackState>()(
       installed: {},
       markInstalled: (regionId, layer, version) =>
         set((s) => ({ installed: { ...s.installed, [regionPackKey(regionId, layer)]: version } })),
+      forgetRegionLayer: (regionId, layer) =>
+        set((s) => ({
+          installed: Object.fromEntries(
+            Object.entries(s.installed).filter(([key]) => key !== regionPackKey(regionId, layer))
+          ),
+        })),
       forgetLayer: (layer) =>
         set((s) => ({
           installed: Object.fromEntries(Object.entries(s.installed).filter(([key]) => !key.endsWith(`:${layer}`))),

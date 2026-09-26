@@ -2,6 +2,7 @@ import {
   blockBounds,
   blockGridLines,
   blockOf,
+  blockPickState,
   blockRangeInBounds,
   blockSizeForZoom,
   cellAreaKm2,
@@ -10,6 +11,7 @@ import {
   MAX_SELECTED_CELLS,
   selectCellsInView,
   selectionAreaKm2,
+  TARGET_BLOCK_DP,
   toggleBlock,
   type Cell,
 } from './blockSelect';
@@ -19,19 +21,19 @@ const cell = (cx: number, cy: number): Cell => ({ cx, cy });
 const keys = (cells: readonly Cell[]) => cells.map((c) => `${c.cx}:${c.cy}`).sort();
 
 describe('blockSizeForZoom', () => {
-  it('is one cell from zoom 9 in — the size a cell already is on screen', () => {
-    for (const zoom of [18, 12, 10, 9.6, 9.5, 9]) expect(blockSizeForZoom(zoom)).toBe(1);
+  it('is one cell from about zoom 7 in — where a square is already a comfortable target', () => {
+    for (const zoom of [18, 12, 10, 9.5, 9, 8, 7.2]) expect(blockSizeForZoom(zoom)).toBe(1);
   });
 
   it('doubles each zoom level out, so zooming out selects more at once', () => {
-    expect(blockSizeForZoom(8.4)).toBe(2);
-    expect(blockSizeForZoom(7.4)).toBe(4);
-    expect(blockSizeForZoom(6.4)).toBe(8);
-    expect(blockSizeForZoom(5.4)).toBe(16);
+    expect(blockSizeForZoom(6.6)).toBe(2);
+    expect(blockSizeForZoom(5.6)).toBe(4);
+    expect(blockSizeForZoom(4.6)).toBe(8);
+    expect(blockSizeForZoom(3.6)).toBe(16);
   });
 
   it('stops at 16 x 16 cells however far out the map is', () => {
-    expect(blockSizeForZoom(3)).toBe(16);
+    expect(blockSizeForZoom(2)).toBe(16);
     expect(blockSizeForZoom(0)).toBe(16);
     expect(blockSizeForZoom(-2)).toBe(16);
   });
@@ -45,13 +47,18 @@ describe('blockSizeForZoom', () => {
     }
   });
 
-  it('keeps a block a finger-friendly size on screen (180-360 dp) at every zoom from 9.5 out to 5', () => {
+  it('keeps a block a finger-friendly size on screen (68-136 dp) at every zoom from 7.5 out to 3.6', () => {
     // At MapLibre zoom z one cell is 512 * 2^(z - 10) dp wide.
-    for (let zoom = 9.5; zoom >= 5; zoom -= 0.1) {
+    for (let zoom = 7.5; zoom >= 3.6; zoom -= 0.05) {
       const dp = blockSizeForZoom(zoom) * 512 * 2 ** (zoom - 10);
-      expect(dp).toBeGreaterThanOrEqual(180);
-      expect(dp).toBeLessThanOrEqual(363);
+      expect(dp).toBeGreaterThanOrEqual(TARGET_BLOCK_DP / Math.SQRT2 - 1);
+      expect(dp).toBeLessThanOrEqual(TARGET_BLOCK_DP * Math.SQRT2 + 1);
     }
+  });
+
+  it('picks single squares far sooner than when a square filled the phone (zoom 9.5)', () => {
+    expect(blockSizeForZoom(8)).toBe(1);
+    expect(blockSizeForZoom(7.5)).toBe(1);
   });
 
   it('falls back to a single cell for a zoom that is not a number', () => {
@@ -304,5 +311,24 @@ describe('picking only cells that pass a filter (the US)', () => {
 
   it('still refuses a view too big to list at all, filter or not', () => {
     expect(selectCellsInView([], [-180, -85, 180, 85], MAX_SELECTED_CELLS, () => true).kind).toBe('too-many');
+  });
+});
+
+describe('blockPickState', () => {
+  it('counts how much of the block under a tap is already picked', () => {
+    const block = cellsInBlock(45, 93, 4);
+    expect(blockPickState([], cell(181, 373), 4)).toEqual({ total: 16, picked: 0 });
+    expect(blockPickState(block.slice(0, 5), cell(181, 373), 4)).toEqual({ total: 16, picked: 5 });
+    expect(blockPickState(block, cell(183, 375), 4)).toEqual({ total: 16, picked: 16 });
+  });
+
+  it('ignores squares outside the block and squares the filter rejects', () => {
+    const inBlock = cellsInBlock(45, 93, 4);
+    const eligible = (c: Cell) => c.cx < 182;
+    expect(blockPickState([...inBlock, cell(50, 50)], cell(181, 373), 4, eligible)).toEqual({ total: 8, picked: 8 });
+  });
+
+  it('has nothing to pick where nothing is eligible', () => {
+    expect(blockPickState([], cell(181, 373), 4, () => false)).toEqual({ total: 0, picked: 0 });
   });
 });
