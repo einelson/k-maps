@@ -1,6 +1,7 @@
 import type { LineString, Point, Polygon } from 'geojson';
 
 import type { TrackSamples } from '../features/trackStats';
+import type { TransportId } from '../features/transport';
 
 /** Common shape produced by the GPX, KML and GeoJSON parsers, ready to insert via featuresRepo. */
 export interface ParsedImportFeature {
@@ -13,6 +14,8 @@ export interface ParsedImportFeature {
   color?: string | null;
   /** Per-point time/elevation for a GPX track, lined up with `geometry`'s coordinates. */
   track?: TrackSamples;
+  /** How a GPX track was travelled, from its `<type>` when it names a way we know. */
+  transport?: TransportId | null;
 }
 
 export type ExportFormat = 'geojson' | 'gpx' | 'kml';

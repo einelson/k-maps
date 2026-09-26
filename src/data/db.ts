@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { CREATE_SCHEMA_SQL, MIGRATE_V2_SQL, SCHEMA_VERSION } from './schema';
+import { CREATE_SCHEMA_SQL, MIGRATE_V2_SQL, SCHEMA_VERSION, TRANSPORT_COLUMNS } from './schema';
 
 export const DATABASE_NAME = 'kmaps.db';
 
@@ -24,5 +24,12 @@ export async function migrateDbIfNeeded(db: SQLiteDatabase): Promise<void> {
 
   await db.execAsync(CREATE_SCHEMA_SQL);
   if (currentVersion >= 1 && currentVersion < 2) await db.execAsync(MIGRATE_V2_SQL);
+  // A brand-new database got the columns from CREATE_SCHEMA_SQL; only older ones need them added.
+  if (currentVersion >= 1 && currentVersion < 5) {
+    for (const { table, column, type } of TRANSPORT_COLUMNS) {
+      const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+      if (!columns.some((c) => c.name === column)) await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  }
   await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import {
   Camera,
-  GeoJSONSource,
   Layer,
   Map,
   RasterSource,
@@ -31,12 +30,6 @@ import { resolveActiveSet, useHuntUnitStore } from '../state/useHuntUnitStore';
 import { useWildfireStore } from '../state/useWildfireStore';
 import { Text, useThemedStyles, type ThemeColors } from '../theme';
 import { openDirections } from '../features/directions';
-import {
-  BLM_FILL_COLOR_EXPRESSION,
-  BLM_PRIVATE_UNKNOWN_DATA,
-  BLM_PRIVATE_UNKNOWN_META,
-  blmAgencyLabel,
-} from './blmSmaSource';
 import { PUBLIC_LAND_DATA, PUBLIC_LAND_META, pubAccessLabel } from './landSource';
 import { MVUM_CLASS_LABELS, MVUM_DATA, MVUM_META, mvumVehicleClass } from './mvumSource';
 import { ensureGlyphs, GLYPHS_URL_TEMPLATE } from './glyphs';
@@ -53,7 +46,6 @@ import {
   LandOverviewLayers,
   MvumLayers,
   OsmLayers,
-  PACK_ANCHORS,
   PackAnchors,
   PoiLayers,
   TrailsLayers,
@@ -114,7 +106,6 @@ type Selected =
       designation: string | null;
     }
   | { kind: 'likelyPrivate' }
-  | { kind: 'blmSma'; agency: string }
   | { kind: 'mvum'; name: string | null; symbolName: string | null; vehicleClass: string; miles: number | null }
   | {
       kind: 'trail';
@@ -159,7 +150,7 @@ export interface MapScreenMapProps {
   /** Long-press on empty map, as lon/lat — MapScreen uses it to drop a pin right where the finger is. */
   onMapLongPress?: (lngLat: LngLat) => void;
   /**
-   * Whether taps on land/MVUM/BLM/POI features open their info cards. Turn off while taps mean
+   * Whether taps on land/MVUM/POI features open their info cards. Turn off while taps mean
    * something else (placing a vertex, picking a download cell) — otherwise a tap on public land,
    * which covers most of the map, would open a card and never reach `onMapPress`.
    */
@@ -207,8 +198,6 @@ export function MapScreenMap({
   const showUserLocation = useLayersStore((s) => s.showUserLocation);
   const landVisible = useLayersStore((s) => s.overlayVisibility.land);
   const landOpacity = useLayersStore((s) => s.overlayOpacity.land);
-  const blmSmaVisible = useLayersStore((s) => s.overlayVisibility.blmSma);
-  const blmSmaOpacity = useLayersStore((s) => s.overlayOpacity.blmSma);
   const mvumVisible = useLayersStore((s) => s.overlayVisibility.mvum);
   const mvumOpacity = useLayersStore((s) => s.overlayOpacity.mvum);
   const reliefVisible = useLayersStore((s) => s.overlayVisibility.shadedRelief);
@@ -357,19 +346,6 @@ export function MapScreenMap({
       ownerType: (p.Own_Type as string | null) ?? null,
       access: pubAccessLabel(p.Pub_Access as string | undefined),
       designation: (p.Des_Tp as string | null) ?? null,
-    });
-  }
-
-  function handleBlmSmaPress(event: {
-    nativeEvent: PressEventWithFeatures;
-    stopPropagation?: () => void;
-  }) {
-    event.stopPropagation?.();
-    const feature = event.nativeEvent.features[0];
-    if (!feature) return;
-    setSelected({
-      kind: 'blmSma',
-      agency: blmAgencyLabel(feature.properties?.ADMIN_AGENCY_CODE as string | undefined),
     });
   }
 
@@ -576,29 +552,6 @@ export function MapScreenMap({
           />
         ))}
 
-        <GeoJSONSource
-          id="blm-sma"
-          data={BLM_PRIVATE_UNKNOWN_DATA}
-          onPress={overlayPressEnabled ? handleBlmSmaPress : undefined}
-        >
-          <Layer
-            id="blm-sma-fill-layer"
-            type="fill"
-            source="blm-sma"
-            beforeId={PACK_ANCHORS.osm}
-            layout={{ visibility: blmSmaVisible ? 'visible' : 'none' }}
-            paint={{ 'fill-color': BLM_FILL_COLOR_EXPRESSION, 'fill-opacity': blmSmaOpacity * 0.4 }}
-          />
-          <Layer
-            id="blm-sma-outline-layer"
-            type="line"
-            source="blm-sma"
-            beforeId={PACK_ANCHORS.osm}
-            layout={{ visibility: blmSmaVisible ? 'visible' : 'none' }}
-            paint={{ 'line-color': BLM_FILL_COLOR_EXPRESSION, 'line-width': 1, 'line-dasharray': [1, 2] }}
-          />
-        </GeoJSONSource>
-
         {mountedPackCells
           .filter((cell) => cell.layer === 'osm')
           .map((cell) => (
@@ -753,26 +706,6 @@ export function MapScreenMap({
           <Text style={styles.cardSource}>
             Public-land data: {PUBLIC_LAND_META.source}. For planning only — verify land status and
             access on the ground.
-          </Text>
-        </View>
-      )}
-
-      {selected?.kind === 'blmSma' && (
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardEyebrow}>BLM cross-check</Text>
-            <Pressable onPress={() => setSelected(null)} hitSlop={12}>
-              <Text style={styles.close}>✕</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.cardTitle}>{selected.agency}</Text>
-          <Text style={styles.cardRow}>
-            Not classified as federal/state/local public land here — a second opinion on &ldquo;not
-            public&rdquo;, not a parcel-level ownership record.
-          </Text>
-          <Text style={styles.cardSource}>
-            {BLM_PRIVATE_UNKNOWN_META.source} · fetched{' '}
-            {BLM_PRIVATE_UNKNOWN_META.fetchedAt.slice(0, 10)}.
           </Text>
         </View>
       )}

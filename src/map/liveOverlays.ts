@@ -17,7 +17,7 @@ export interface LegendEntry {
   label: string;
 }
 
-export type LiveRasterId = 'radar' | 'nhd' | 'wetlands' | 'slopeAngle' | 'landManager';
+export type LiveRasterId = 'radar' | 'nhd' | 'wetlands' | 'slopeAngle' | 'landManager' | 'blmSma';
 
 export interface LiveRasterDef {
   id: LiveRasterId;
@@ -126,6 +126,78 @@ export const LAND_MANAGER_LEGEND: LegendEntry[] = [
   { color: '#8fb5be', label: 'Local' },
 ];
 
+// --- BLM cross-check (Private or Unknown) ---------------------------------------------------
+
+/**
+ * BLM's "Private or Unknown" surface-management class, drawn by the service itself. In the lower 48 this
+ * class is a handful of continent-sized polygons with a hole for every public parcel (Alaska is the only
+ * place it is fine-grained), so a per-cell vector pack would mean downloading megabytes of geometry to
+ * clip a few hundred metres; the server-side raster is a few KB per tile and works in every state.
+ */
+export const BLM_SMA_EXPORT_URL =
+  'https://gis.blm.gov/arcgis/rest/services/lands/BLM_Natl_SMA_LimitedScale/MapServer/export';
+/**
+ * The "LimitedScale" service draws nothing above 1:36,118 (about z14) and ignores a minScale override, so
+ * that is where this overlay starts. Past it the export just keeps drawing, so MapLibre can ask for more.
+ */
+export const BLM_SMA_MIN_ZOOM = 14;
+export const BLM_SMA_MAX_ZOOM = 17;
+/** The FEATURES-group copy of "Private or Unknown". Layer 16 (the IDENTIFY group's copy) draws nothing when exported. */
+const BLM_SMA_LAYER_ID = 31;
+
+export const BLM_AGENCY_COLORS = {
+  PVT: '#9ca3af', // private
+  UND: '#a855f7', // undetermined/unknown
+} as const;
+/** The tint is baked into the server-drawn symbols (40%), so the overlay's opacity slider starts at 1 like any other layer. */
+const BLM_SMA_ALPHA = 102;
+
+export const BLM_SMA_LEGEND: LegendEntry[] = [
+  { color: BLM_AGENCY_COLORS.PVT, label: 'Private' },
+  { color: BLM_AGENCY_COLORS.UND, label: 'Undetermined' },
+];
+
+const hexToRgb = (hex: string): [number, number, number] => [
+  parseInt(hex.slice(1, 3), 16),
+  parseInt(hex.slice(3, 5), 16),
+  parseInt(hex.slice(5, 7), 16),
+];
+
+/** A flat, outline-free fill symbol in ArcGIS's JSON symbol format. */
+function fillSymbol(hex: string) {
+  return {
+    type: 'esriSFS',
+    style: 'esriSFSSolid',
+    color: [...hexToRgb(hex), BLM_SMA_ALPHA],
+    outline: { type: 'esriSLS', style: 'esriSLSNull' },
+  };
+}
+
+/**
+ * `dynamicLayers` for the export: the one layer, re-symbolized by `ADMIN_AGENCY_CODE` (the service's own
+ * symbol is opaque white, which MapLibre can't recolor). Built from `BLM_AGENCY_COLORS` so it cannot
+ * drift from the legend.
+ */
+export function blmSmaDynamicLayers() {
+  return [
+    {
+      id: BLM_SMA_LAYER_ID,
+      source: { type: 'mapLayer', mapLayerId: BLM_SMA_LAYER_ID },
+      drawingInfo: {
+        renderer: {
+          type: 'uniqueValue',
+          field1: 'ADMIN_AGENCY_CODE',
+          defaultSymbol: fillSymbol(BLM_AGENCY_COLORS.UND),
+          uniqueValueInfos: (Object.keys(BLM_AGENCY_COLORS) as (keyof typeof BLM_AGENCY_COLORS)[]).map((code) => ({
+            value: code,
+            symbol: fillSymbol(BLM_AGENCY_COLORS[code]),
+          })),
+        },
+      },
+    },
+  ];
+}
+
 // --- Assembling the sources ---------------------------------------------------------------
 
 /**
@@ -142,6 +214,7 @@ const ATTRIBUTIONS: Record<LiveRasterId, string> = {
   wetlands: 'USFWS National Wetlands Inventory',
   slopeAngle: 'USGS 3DEP',
   landManager: 'BLM National SMA',
+  blmSma: 'BLM National SMA',
 };
 
 /** Static definitions; `liveRasterTiles` fills in the time-dependent URL. */
@@ -188,6 +261,16 @@ export const LIVE_RASTERS: Record<LiveRasterId, LiveRasterDef> = {
     minzoom: 0,
     maxzoom: LAND_MANAGER_MAX_ZOOM,
     attribution: ATTRIBUTIONS.landManager,
+  },
+  blmSma: {
+    id: 'blmSma',
+    tiles: `${BLM_SMA_EXPORT_URL}?${EXPORT_PARAMS}&dynamicLayers=${encodeURIComponent(
+      JSON.stringify(blmSmaDynamicLayers())
+    )}`,
+    tileSize: 256,
+    minzoom: BLM_SMA_MIN_ZOOM,
+    maxzoom: BLM_SMA_MAX_ZOOM,
+    attribution: ATTRIBUTIONS.blmSma,
   },
 };
 

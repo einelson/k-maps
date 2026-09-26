@@ -24,6 +24,7 @@ export function makeFeature(
     area_m2: null,
     elevation_m: null,
     source: 'manual',
+    transport: null,
     created_at: 0,
     updated_at: 0,
     ...overrides,

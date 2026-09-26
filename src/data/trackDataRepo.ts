@@ -9,9 +9,16 @@ import type { TrackSamples } from '../features/trackStats';
  * `dropTrackDataIfMisaligned` discards them.
  */
 
+/**
+ * Stored as `{"t0", "dt", "e"}`: the first fix's epoch ms, then each fix's milliseconds after the one before
+ * it (a few digits instead of thirteen, and lossless), then altitudes. Rows written before that hold
+ * `{"t": [epoch ms...], "e"}` and still read fine.
+ */
 function encode(samples: TrackSamples): string {
+  const times = samples.times;
   return JSON.stringify({
-    t: samples.times,
+    t0: times && times.length > 0 ? times[0] : null,
+    dt: times ? times.map((t, i) => (i === 0 ? 0 : t - times[i - 1])) : null,
     // A tenth of a metre is far finer than GPS altitude; it keeps the stored JSON compact.
     e: samples.elevations?.map((e) => (e == null ? null : Math.round(e * 10) / 10)) ?? null,
   });
@@ -21,14 +28,28 @@ const isNumberArray = (v: unknown, allowNull: boolean): boolean =>
   Array.isArray(v) &&
   v.every((x) => (allowNull && x === null) || (typeof x === 'number' && Number.isFinite(x)));
 
+/** The times, null when there are none, or undefined when what is stored is malformed. */
+function decodeTimes(parsed: { t?: unknown; t0?: unknown; dt?: unknown }): number[] | null | undefined {
+  if (parsed.dt != null) {
+    if (!isNumberArray(parsed.dt, false)) return undefined;
+    const deltas = parsed.dt as number[];
+    if (deltas.length === 0) return [];
+    if (typeof parsed.t0 !== 'number' || !Number.isFinite(parsed.t0)) return undefined;
+    let time = parsed.t0; // the first delta is 0, so the first time is t0 itself
+    return deltas.map((delta) => (time += delta));
+  }
+  if (parsed.t == null) return null;
+  return isNumberArray(parsed.t, false) ? (parsed.t as number[]) : undefined;
+}
+
 function decode(data: string): TrackSamples | null {
   try {
-    const parsed = JSON.parse(data) as { t?: unknown; e?: unknown };
-    const times = parsed.t == null ? null : parsed.t;
+    const parsed = JSON.parse(data) as { t?: unknown; t0?: unknown; dt?: unknown; e?: unknown };
+    const times = decodeTimes(parsed);
     const elevations = parsed.e == null ? null : parsed.e;
-    if (times != null && !isNumberArray(times, false)) return null;
+    if (times === undefined) return null;
     if (elevations != null && !isNumberArray(elevations, true)) return null;
-    return { times: times as number[] | null, elevations: elevations as (number | null)[] | null };
+    return { times, elevations: elevations as (number | null)[] | null };
   } catch {
     return null;
   }

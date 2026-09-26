@@ -24,6 +24,7 @@ import { formatCoordinate } from '../features/coordinates';
 import { openDirections } from '../features/directions';
 import { DEFAULT_PIN_COLOR, resolvePinStyle, type PinStyleId } from '../features/pinStyles';
 import type { TrackSamples } from '../features/trackStats';
+import { transportMode, type TransportId } from '../features/transport';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { useSettingsStore, type CoordinateFormat } from '../state/useSettingsStore';
 import { Text, TextInput, useThemedStyles, type ThemeColors } from '../theme';
@@ -32,6 +33,7 @@ import { FolderPickerModal } from './components/FolderPickerModal';
 import { PhotoStrip } from './components/PhotoStrip';
 import { PinStylePicker } from './components/PinStylePicker';
 import { TrackDashboard } from './components/TrackDashboard';
+import { TransportChips } from './components/TransportPicker';
 
 /** GeoJSON coordinates are [lon, lat]; returns null for non-point geometry (or a Directions button doesn't apply). */
 function parsePointLonLat(geometry: string): [number, number] | null {
@@ -80,6 +82,7 @@ export function FeatureDetailScreen() {
   const [color, setColor] = useState<string | null>(null);
   const [icon, setIcon] = useState<PinStyleId>(resolvePinStyle(null));
   const [folderId, setFolderId] = useState<number | null>(null);
+  const [transport, setTransport] = useState<TransportId | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [featureTags, setFeatureTags] = useState<Tag[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -102,6 +105,7 @@ export function FeatureDetailScreen() {
     setColor(row?.color ?? null);
     setIcon(resolvePinStyle(row?.icon));
     setFolderId(row?.folder_id ?? null);
+    setTransport(transportMode(row?.transport)?.id ?? null);
     setFolders(folderRows);
     setFeatureTags(tagRows);
     setAllTags(allTagRows);
@@ -115,13 +119,15 @@ export function FeatureDetailScreen() {
 
   async function save() {
     await db.runAsync(
-      'UPDATE features SET name = ?, notes = ?, color = ?, icon = ?, folder_id = ?, updated_at = ? WHERE id = ?',
+      'UPDATE features SET name = ?, notes = ?, color = ?, icon = ?, folder_id = ?, transport = ?, updated_at = ? WHERE id = ?',
       name || null,
       notes || null,
       color,
       // Only pins have a style; leave lines and areas' icon untouched (imports may carry one).
       feature?.type === 'point' ? icon : (feature?.icon ?? null),
       folderId,
+      // Only tracks have a way of getting around; anything else keeps whatever it had.
+      isTrack ? transport : (feature?.transport ?? null),
       Date.now(),
       featureId
     );
@@ -164,6 +170,8 @@ export function FeatureDetailScreen() {
   }
 
   const lineCoordinates = useMemo(() => (feature ? parseLineCoordinates(feature.geometry) : null), [feature]);
+  // Recorded and imported lines are tracks that were travelled, so they get a way of getting around; a line drawn by hand doesn't.
+  const isTrack = lineCoordinates != null && (feature?.source === 'track' || feature?.source === 'imported' || samples != null);
 
   async function handleExportGpx() {
     if (!feature) return;
@@ -202,6 +210,13 @@ export function FeatureDetailScreen() {
 
       <Text style={styles.label}>Name</Text>
       <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Untitled" />
+
+      {isTrack && (
+        <>
+          <Text style={styles.label}>Travelled by</Text>
+          <TransportChips value={transport} onChange={setTransport} />
+        </>
+      )}
 
       <Text style={styles.label}>Notes</Text>
       <TextInput

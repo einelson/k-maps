@@ -1,4 +1,7 @@
 import {
+  BLM_AGENCY_COLORS,
+  BLM_SMA_LEGEND,
+  blmSmaDynamicLayers,
   LAND_MANAGER_LEGEND,
   LIVE_RASTERS,
   liveRasterTiles,
@@ -30,7 +33,7 @@ describe('live raster definitions', () => {
   });
 
   it('export-style layers ask MapLibre for each tile\'s Web Mercator box and ask for transparency', () => {
-    for (const id of ['radar', 'wetlands', 'slopeAngle'] as const) {
+    for (const id of ['radar', 'wetlands', 'slopeAngle', 'blmSma'] as const) {
       const tiles = LIVE_RASTERS[id].tiles;
       expect(tiles).toContain(`bbox=${BBOX}`);
       const p = params(tiles);
@@ -42,6 +45,7 @@ describe('live raster definitions', () => {
     }
     expect(params(LIVE_RASTERS.radar.tiles).get('transparent')).toBe('true');
     expect(params(LIVE_RASTERS.wetlands.tiles).get('transparent')).toBe('true');
+    expect(params(LIVE_RASTERS.blmSma.tiles).get('transparent')).toBe('true');
   });
 
   it('cached-tile layers use the esri z/y/x order (not z/x/y)', () => {
@@ -61,6 +65,7 @@ describe('live raster definitions', () => {
     expect(LIVE_RASTERS.wetlands.minzoom).toBe(13); // draws nothing above 1:100,000
     expect(LIVE_RASTERS.landManager.maxzoom).toBe(14); // cached tiles 404 past z14
     expect(LIVE_RASTERS.nhd.maxzoom).toBe(16);
+    expect(LIVE_RASTERS.blmSma.minzoom).toBe(14); // "LimitedScale": nothing is drawn above 1:36,118
     expect(LIVE_RASTERS.slopeAngle.minzoom).toBeGreaterThanOrEqual(12); // DEM is ~10 m; coarser slope is meaningless
   });
 
@@ -138,5 +143,37 @@ describe('land manager legend', () => {
     for (const entry of LAND_MANAGER_LEGEND) expect(entry.color).toMatch(/^#[0-9a-f]{6}$/i);
     expect(new Set(LAND_MANAGER_LEGEND.map((e) => e.label)).size).toBe(LAND_MANAGER_LEGEND.length);
     expect(LAND_MANAGER_LEGEND.slice(0, 2).map((e) => e.label)).toEqual(['BLM', 'US Forest Service']);
+  });
+});
+
+describe('BLM cross-check overlay', () => {
+  it('is drawn by the national service, not a bundled clip of one region', () => {
+    expect(LIVE_RASTERS.blmSma.tiles).toMatch(/^https:\/\/gis\.blm\.gov\/.*\/BLM_Natl_SMA_LimitedScale\/MapServer\/export\?/);
+  });
+
+  it('re-symbolizes the FEATURES-group layer by agency code, 40% tint and no outline', () => {
+    const [layer] = blmSmaDynamicLayers();
+    expect(layer.source).toEqual({ type: 'mapLayer', mapLayerId: layer.id });
+    expect(layer.id).toBe(31); // layer 16 (the IDENTIFY copy) exports blank
+    const { renderer } = layer.drawingInfo;
+    expect(renderer.field1).toBe('ADMIN_AGENCY_CODE');
+    expect(renderer.uniqueValueInfos.map((i) => i.value)).toEqual(['PVT', 'UND']);
+    expect(renderer.uniqueValueInfos[0].symbol.color).toEqual([156, 163, 175, 102]);
+    expect(renderer.defaultSymbol.color).toEqual([168, 85, 247, 102]); // codes we don't know count as undetermined
+    for (const { symbol } of renderer.uniqueValueInfos) expect(symbol.outline.style).toBe('esriSLSNull');
+  });
+
+  it('is embedded (URL-encoded) in the tile template and round-trips', () => {
+    const tiles = LIVE_RASTERS.blmSma.tiles;
+    expect(JSON.parse(params(tiles).get('dynamicLayers')!)).toEqual(blmSmaDynamicLayers());
+    expect(tiles).not.toContain('"');
+  });
+
+  it('legend matches the colors it draws with', () => {
+    expect(BLM_SMA_LEGEND).toEqual([
+      { color: BLM_AGENCY_COLORS.PVT, label: 'Private' },
+      { color: BLM_AGENCY_COLORS.UND, label: 'Undetermined' },
+    ]);
+    for (const entry of BLM_SMA_LEGEND) expect(entry.color).toMatch(/^#[0-9a-f]{6}$/i);
   });
 });

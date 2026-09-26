@@ -1,5 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { transportMode, type TransportId } from '../features/transport';
+
 /**
  * The track being recorded right now. The background location task appends fixes here (it can be running
  * while the screen is locked or the app has been closed), and the app reads them back to draw the live line
@@ -19,16 +21,32 @@ export interface StoredFix extends NewFix {
   id: number;
 }
 
-export async function startRecordingSession(db: SQLiteDatabase, startedAt: number): Promise<void> {
+export async function startRecordingSession(
+  db: SQLiteDatabase,
+  startedAt: number,
+  transport: TransportId | null = null
+): Promise<void> {
   await db.withTransactionAsync(async () => {
     await db.runAsync('DELETE FROM recording_fixes');
-    await db.runAsync('INSERT OR REPLACE INTO recording_session (id, started_at) VALUES (1, ?)', startedAt);
+    await db.runAsync(
+      'INSERT OR REPLACE INTO recording_session (id, started_at, transport) VALUES (1, ?, ?)',
+      startedAt,
+      transport
+    );
   });
 }
 
-export async function getRecordingSession(db: SQLiteDatabase): Promise<{ startedAt: number } | null> {
-  const row = await db.getFirstAsync<{ started_at: number }>('SELECT started_at FROM recording_session WHERE id = 1');
-  return row ? { startedAt: row.started_at } : null;
+export interface RecordingSession {
+  startedAt: number;
+  /** How it is being travelled; null for a recording that began before transport existed. */
+  transport: TransportId | null;
+}
+
+export async function getRecordingSession(db: SQLiteDatabase): Promise<RecordingSession | null> {
+  const row = await db.getFirstAsync<{ started_at: number; transport: string | null }>(
+    'SELECT started_at, transport FROM recording_session WHERE id = 1'
+  );
+  return row ? { startedAt: row.started_at, transport: transportMode(row.transport)?.id ?? null } : null;
 }
 
 /**

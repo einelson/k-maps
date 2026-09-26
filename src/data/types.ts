@@ -28,6 +28,8 @@ export interface Feature {
   area_m2: number | null;
   elevation_m: number | null;
   source: FeatureSource;
+  /** How a track was travelled (a `TransportId`); null for anything that isn't a track or hasn't been set. */
+  transport: string | null;
   created_at: number;
   updated_at: number;
 }

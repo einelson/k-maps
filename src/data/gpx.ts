@@ -5,6 +5,7 @@ import type { Feature } from './types';
 import type { TrackSamples } from '../features/trackStats';
 import type { ParsedImportFeature } from './importTypes';
 import { gpxColorToPalette } from '../features/colorMatch';
+import { parseTransport, transportMode, type TransportId } from '../features/transport';
 import { asArray, escapeXml, textOf } from './xmlUtil';
 
 /**
@@ -28,7 +29,10 @@ export function featuresToGpx(features: Feature[], samplesByFeatureId: Map<numbe
       const ring: Position[] = geometry.type === 'Polygon' ? geometry.coordinates[0] : geometry.coordinates;
       const samples = geometry.type === 'LineString' ? alignedSamples(samplesByFeatureId.get(f.id), ring.length) : null;
       const trkpts = ring.map(([lon, lat], i) => trkpt(lon, lat, samples, i)).join('\n');
-      trks.push(`  <trk>${nameTag}${descTag}<trkseg>\n${trkpts}\n    </trkseg></trk>`);
+      // GPX 1.1's <type> ("classification of the track") sits after <desc> and before <trkseg>.
+      const gpxType = geometry.type === 'LineString' ? transportMode(f.transport)?.gpxType : null;
+      const typeTag = gpxType ? `<type>${escapeXml(gpxType)}</type>` : '';
+      trks.push(`  <trk>${nameTag}${descTag}${typeTag}<trkseg>\n${trkpts}\n    </trkseg></trk>`);
     }
   }
 
@@ -101,6 +105,7 @@ export function parseGpx(xml: string): ParsedImportFeature[] {
         geometry: { type: 'LineString', coordinates },
         folderPath: [],
         color: extensionColor(trk.extensions),
+        ...transportField(trk),
         ...(samples ? { track: samples } : {}),
       });
     }
@@ -115,10 +120,17 @@ export function parseGpx(xml: string): ParsedImportFeature[] {
       geometry: { type: 'LineString', coordinates },
       folderPath: [],
       color: extensionColor(rte.extensions),
+      ...transportField(rte),
     });
   }
 
   return results;
+}
+
+/** `{ transport }` when a track or route's `<type>` names a way of getting around we know, else nothing. */
+function transportField(node: any): { transport: TransportId } | Record<string, never> {
+  const transport = parseTransport(textOf(node.type));
+  return transport ? { transport } : {};
 }
 
 /** `<desc>` and `<cmt>` both hold free text (Garmin devices fill `cmt`); keep whichever exist, once each. */

@@ -58,7 +58,7 @@ describe('overlay groups', () => {
 
   it('marks the live-service overlays as online-only, and the vector data ones as not', () => {
     const online = OVERLAYS.filter((o) => o.onlineOnly).map((o) => o.id).sort();
-    expect(online).toEqual(['landManager', 'nhd', 'radar', 'shadedRelief', 'slopeAngle', 'wetlands'].sort());
+    expect(online).toEqual(['blmSma', 'landManager', 'nhd', 'radar', 'shadedRelief', 'slopeAngle', 'wetlands'].sort());
   });
 
   it('legend colors are valid hex', () => {

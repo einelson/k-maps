@@ -21,14 +21,25 @@ describe('recording session', () => {
   it('has no session until one is started', async () => {
     expect(await getRecordingSession(db)).toBeNull();
     await startRecordingSession(db, 5000);
-    expect(await getRecordingSession(db)).toEqual({ startedAt: 5000 });
+    expect(await getRecordingSession(db)).toEqual({ startedAt: 5000, transport: null });
+  });
+
+  it('remembers how the track is being travelled, so a restored recording keeps its GPS spacing', async () => {
+    await startRecordingSession(db, 5000, 'horse');
+    expect(await getRecordingSession(db)).toEqual({ startedAt: 5000, transport: 'horse' });
+  });
+
+  it('reads an unknown stored mode as none rather than passing it on', async () => {
+    await startRecordingSession(db, 5000);
+    await db.runAsync("UPDATE recording_session SET transport = 'jetpack'");
+    expect((await getRecordingSession(db))!.transport).toBeNull();
   });
 
   it('starting again replaces the session and wipes the old fixes', async () => {
     await startRecordingSession(db, 1000);
     await appendRecordingFixes(db, [fix(1), fix(2)]);
     await startRecordingSession(db, 9000);
-    expect(await getRecordingSession(db)).toEqual({ startedAt: 9000 });
+    expect(await getRecordingSession(db)).toEqual({ startedAt: 9000, transport: null });
     expect(await loadRecordingFixes(db)).toEqual([]);
   });
 

@@ -76,6 +76,12 @@ describe('RecordingPanel', () => {
     expect(all).toContain('Distance over time (mi)');
   });
 
+  it('names how the track is being travelled in the header', () => {
+    act(() => useTrackRecordingStore.getState().begin(NOW - 600_000, 'horse'));
+    mount();
+    expect(texts()).toContain('Recording track · Horse');
+  });
+
   it('keeps counting up while open', () => {
     recordFixes(21);
     mount();

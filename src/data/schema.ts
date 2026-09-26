@@ -3,14 +3,22 @@
  * split into numbered migrations once the schema needs to change on devices
  * that already have data.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * v3 added `track_data` (time and altitude per recorded point) and v4 added `recording_session` /
  * `recording_fixes` (the in-progress recording, written by the background location task). Their
  * `CREATE TABLE IF NOT EXISTS` statements in CREATE_SCHEMA_SQL are the whole migrations, so there are no
  * MIGRATE_V3_SQL / MIGRATE_V4_SQL.
+ *
+ * v5 added `transport` (how a track was travelled) to `features` and `recording_session`. Those tables already
+ * exist on older databases, where `CREATE TABLE IF NOT EXISTS` won't add a column, so `migrateDbIfNeeded` adds
+ * `TRANSPORT_COLUMNS` itself, skipping any that are already there.
  */
+export const TRANSPORT_COLUMNS = [
+  { table: 'features', column: 'transport', type: 'TEXT' },
+  { table: 'recording_session', column: 'transport', type: 'TEXT' },
+] as const;
 
 /**
  * v2: `features_fts` (external-content) was only ever written on create, so
@@ -43,7 +51,8 @@ CREATE TABLE IF NOT EXISTS features (
   min_lon REAL, min_lat REAL, max_lon REAL, max_lat REAL,
   length_m REAL, area_m2 REAL, elevation_m REAL,
   source TEXT DEFAULT 'manual',
-  created_at INTEGER, updated_at INTEGER
+  created_at INTEGER, updated_at INTEGER,
+  transport TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tags (
@@ -73,7 +82,8 @@ CREATE TABLE IF NOT EXISTS track_data (
 -- Kept in SQLite (not memory) so a recording survives the app being closed or killed mid-track.
 CREATE TABLE IF NOT EXISTS recording_session (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  started_at INTEGER NOT NULL
+  started_at INTEGER NOT NULL,
+  transport TEXT
 );
 
 CREATE TABLE IF NOT EXISTS recording_fixes (

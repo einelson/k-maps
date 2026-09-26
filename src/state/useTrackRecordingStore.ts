@@ -3,6 +3,7 @@ import type { Position } from 'geojson';
 
 import type { StoredFix } from '../data/recordingRepo';
 import { haversineM } from '../features/trackStats';
+import type { TransportId } from '../features/transport';
 
 /**
  * §7.5 GPS tracks. This is the on-screen mirror of the recording in SQLite (`recording_session` +
@@ -13,6 +14,8 @@ import { haversineM } from '../features/trackStats';
 interface TrackRecordingState {
   recording: boolean;
   startedAt: number | null;
+  /** How the track is being travelled; sets how often the GPS is asked for a fix. Null if none was chosen. */
+  transport: TransportId | null;
   /** These three line up index-for-index: fix i is `points[i]` at `times[i]` and `altitudes[i]`. */
   points: Position[];
   times: number[];
@@ -25,9 +28,9 @@ interface TrackRecordingState {
   interrupted: boolean;
   /** Updates had stopped (the system or the user closed the app) and were started again: the line jumps across a gap. */
   resumedAfterGap: boolean;
-  begin: (startedAt: number) => void;
+  begin: (startedAt: number, transport?: TransportId | null) => void;
   /** Replaces everything with the stored recording. */
-  hydrate: (startedAt: number, fixes: StoredFix[]) => void;
+  hydrate: (startedAt: number, fixes: StoredFix[], transport?: TransportId | null) => void;
   /** Adds fixes newer than what is already mirrored. */
   appendFixes: (fixes: StoredFix[]) => void;
   setInterrupted: (interrupted: boolean) => void;
@@ -38,6 +41,7 @@ interface TrackRecordingState {
 const EMPTY = {
   recording: false,
   startedAt: null,
+  transport: null as TransportId | null,
   points: [] as Position[],
   times: [] as number[],
   altitudes: [] as (number | null)[],
@@ -69,9 +73,16 @@ function withFixes<S extends Pick<TrackRecordingState, 'points' | 'times' | 'alt
 
 export const useTrackRecordingStore = create<TrackRecordingState>((set) => ({
   ...EMPTY,
-  begin: (startedAt) => set({ ...EMPTY, recording: true, startedAt }),
-  hydrate: (startedAt, fixes) =>
-    set((s) => ({ ...withFixes({ ...s, ...EMPTY }, fixes), recording: true, startedAt, interrupted: s.interrupted, resumedAfterGap: s.resumedAfterGap })),
+  begin: (startedAt, transport = null) => set({ ...EMPTY, recording: true, startedAt, transport }),
+  hydrate: (startedAt, fixes, transport = null) =>
+    set((s) => ({
+      ...withFixes({ ...s, ...EMPTY }, fixes),
+      recording: true,
+      startedAt,
+      transport,
+      interrupted: s.interrupted,
+      resumedAfterGap: s.resumedAfterGap,
+    })),
   // A sync that was already in flight when the recording ended must not repopulate the cleared store.
   appendFixes: (fixes) => set((s) => (s.recording ? withFixes(s, fixes.filter((f) => f.id > s.lastFixId)) : s)),
   setInterrupted: (interrupted) => set({ interrupted }),

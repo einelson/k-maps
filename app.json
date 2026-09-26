@@ -66,6 +66,7 @@
         }
       ],
       "expo-sharing",
+      "./plugins/withAutoPlay",
       [
         "expo-image-picker",
         {

@@ -160,3 +160,47 @@ describe('editing a track after recording', () => {
     expect(await getTrackData(db, id)).toBeNull();
   });
 });
+
+describe('compact time encoding', () => {
+  const stored = async (id: number) => (await db.getFirstAsync<{ data: string }>('SELECT data FROM track_data WHERE feature_id = ?', id))!.data;
+  const epoch = 1_750_000_000_000;
+
+  it('stores the first time once and every later one as a delta, so a timestamp is not repeated per point', async () => {
+    const id = await createFeature(db, { geometry: line(4), source: 'track' });
+    const times = [epoch, epoch + 3012, epoch + 5999, epoch + 9000];
+    await saveTrackData(db, id, { times, elevations: [1, 2, 3, 4] });
+    expect(JSON.parse(await stored(id))).toEqual({ t0: epoch, dt: [0, 3012, 2987, 3001], e: [1, 2, 3, 4] });
+    expect(await getTrackData(db, id)).toEqual({ times, elevations: [1, 2, 3, 4] }); // lossless, to the millisecond
+  });
+
+  it('is much smaller than one epoch timestamp per point', async () => {
+    const n = 2000;
+    const times = Array.from({ length: n }, (_, i) => epoch + i * 3000);
+    const id = await createFeature(db, { geometry: line(n), source: 'track' });
+    await saveTrackData(db, id, { times, elevations: null });
+    expect((await stored(id)).length).toBeLessThan(JSON.stringify({ t: times, e: null }).length / 2);
+  });
+
+  it('still reads rows saved in the old format', async () => {
+    const id = await createFeature(db, { geometry: line(3), source: 'track' });
+    await db.runAsync('INSERT INTO track_data (feature_id, data) VALUES (?, ?)', id, JSON.stringify({ t: [1000, 2000, 3500], e: [10, null, 12] }));
+    expect(await getTrackData(db, id)).toEqual({ times: [1000, 2000, 3500], elevations: [10, null, 12] });
+  });
+
+  it('round-trips out-of-order times and an empty list', async () => {
+    const a = await createFeature(db, { geometry: line(3) });
+    const b = await createFeature(db, { geometry: line(2) });
+    await saveTrackData(db, a, { times: [5000, 4000, 9000], elevations: null });
+    await saveTrackData(db, b, { times: [], elevations: [1, 2] });
+    expect((await getTrackData(db, a))!.times).toEqual([5000, 4000, 9000]);
+    expect((await getTrackData(db, b))!.times).toEqual([]);
+  });
+
+  it('treats malformed delta data as no data', async () => {
+    const id = await createFeature(db, { geometry: line(2) });
+    await db.runAsync('INSERT INTO track_data (feature_id, data) VALUES (?, ?)', id, JSON.stringify({ t0: 'x', dt: [0, 1] }));
+    expect(await getTrackData(db, id)).toBeNull();
+    await db.runAsync('UPDATE track_data SET data = ? WHERE feature_id = ?', JSON.stringify({ t0: 5, dt: [0, 'a'] }), id);
+    expect(await getTrackData(db, id)).toBeNull();
+  });
+});

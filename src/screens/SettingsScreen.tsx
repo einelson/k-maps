@@ -7,6 +7,7 @@ import {
   type UnitSystem,
 } from '../state/useSettingsStore';
 import { Text, useThemedStyles, type AppearancePreference, type ThemeColors } from '../theme';
+import { TrackSpacingSettings } from './components/TrackSpacingSettings';
 
 function OptionRow<T extends string>({
   label,
@@ -87,6 +88,8 @@ export function SettingsScreen() {
           { id: 'utm', label: 'UTM' },
         ]}
       />
+
+      <TrackSpacingSettings />
 
       <Text style={styles.sectionTitle}>Data sources & attribution</Text>
       <Text style={styles.body}>

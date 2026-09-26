@@ -1,6 +1,6 @@
 import type { OverlayLayerId } from '../state/useLayersStore';
 import { HUNT_UNIT_COLOR } from './huntUnitsStyle';
-import { LAND_MANAGER_LEGEND, SLOPE_CLASSES, type LegendEntry } from './liveOverlays';
+import { BLM_SMA_LEGEND, LAND_MANAGER_LEGEND, SLOPE_CLASSES, type LegendEntry } from './liveOverlays';
 import { TRAIL_CLASS_COLORS, TRAIL_CLASS_LABELS } from './trailsSource';
 import { USGS_ATTRIBUTION, type BaseMapMode } from './usgsSources';
 import { PRESCRIBED_COLOR, WILDFIRE_COLOR } from './wildfireSource';
@@ -68,7 +68,10 @@ export const OVERLAYS: OverlayOption[] = [
     id: 'blmSma',
     group: 'land',
     label: 'BLM cross-check (private/unknown)',
-    note: 'Second opinion on "not public" from BLM, not a parcel-level ownership record. Bundled for the southwest Idaho starter region only.',
+    note: 'Second opinion on "not public" from BLM, not a parcel-level ownership record. Gray = classed private, purple = undetermined. Drawn by BLM for the whole US from about zoom 14, so zoom in to see it. BLM is strongest in the West; much of the East is simply "undetermined".',
+    onlineOnly: true,
+    legend: BLM_SMA_LEGEND,
+    attribution: 'BLM National SMA',
   },
   {
     id: 'huntUnits',

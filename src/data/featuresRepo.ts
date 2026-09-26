@@ -4,6 +4,7 @@ import type { FeatureCollection, Geometry } from 'geojson';
 import type { Feature, FeatureType } from './types';
 import { computeGeometryMetrics, geometryTypeToFeatureType } from '../features/measure';
 import { DEFAULT_PIN_COLOR, resolvePinStyle, type PinStyleId } from '../features/pinStyles';
+import type { TransportId } from '../features/transport';
 import { expandFolderIds, folderAncestryIds } from './folderTree';
 import { listFolders } from './foldersRepo';
 import { deletePhotosForFeatures } from './photosRepo';
@@ -85,6 +86,7 @@ export interface CreateFeatureInput {
   icon?: string | null;
   geometry: Geometry;
   source?: Feature['source'];
+  transport?: TransportId | null;
 }
 
 export async function createFeature(
@@ -99,8 +101,8 @@ export async function createFeature(
     `INSERT INTO features
       (folder_id, type, name, notes, color, icon, geometry,
        min_lon, min_lat, max_lon, max_lat, length_m, area_m2,
-       source, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       source, transport, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.folderId ?? null,
     type,
     input.name ?? null,
@@ -115,6 +117,7 @@ export async function createFeature(
     metrics.lengthM,
     metrics.areaM2,
     input.source ?? 'manual',
+    input.transport ?? null,
     now,
     now
   );

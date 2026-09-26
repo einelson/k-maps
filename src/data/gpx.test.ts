@@ -540,3 +540,42 @@ describe('track samples: import', () => {
     for (const f of parsed) expect(f).not.toHaveProperty('track');
   });
 });
+
+describe('transport (<type>)', () => {
+  const trackFeature = (transport: string | null) =>
+    makeFeature(LINE, { id: 3, name: 'Ride', type: 'line', source: 'track', transport });
+
+  it('writes the mode as the track\'s <type>, after <desc> and before <trkseg> as GPX 1.1 orders them', () => {
+    const xml = featuresToGpx([{ ...trackFeature('horse'), notes: 'Long day' }]);
+    expect(XMLValidator.validate(xml)).toBe(true);
+    expect(xml).toContain('<name>Ride</name><desc>Long day</desc><type>horseback riding</type><trkseg>');
+  });
+
+  it('writes no <type> when the track has no mode, or for points', () => {
+    expect(featuresToGpx([trackFeature(null)])).not.toContain('<type>');
+    expect(featuresToGpx([makeFeature(POINT, { transport: 'foot' })])).not.toContain('<type>');
+  });
+
+  it('ignores a stored mode it does not recognise instead of writing it', () => {
+    expect(featuresToGpx([trackFeature('jetpack')])).not.toContain('<type>');
+  });
+
+  it('round-trips every mode through export and import', () => {
+    for (const id of ['foot', 'horse', 'bike', 'atv', 'vehicle', 'boat', 'other'] as const) {
+      const [parsed] = parseGpx(featuresToGpx([trackFeature(id)]));
+      expect(parsed.transport).toBe(id);
+    }
+  });
+
+  it('reads <type> from third-party tracks and routes, leaving it off when it is not a known way of getting around', () => {
+    const parsed = parseGpx(
+      gpxDoc(
+        `<trk><name>A</name><type>Hiking</type><trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk>` +
+          `<trk><name>B</name><type>1</type><trkseg><trkpt lat="1" lon="2"/><trkpt lat="3" lon="4"/></trkseg></trk>` +
+          `<rte><name>C</name><type>cycling</type><rtept lat="1" lon="2"/><rtept lat="3" lon="4"/></rte>`
+      )
+    );
+    expect(parsed.map((f) => f.transport)).toEqual(['foot', undefined, 'bike']);
+    expect(parsed[1]).not.toHaveProperty('transport');
+  });
+});

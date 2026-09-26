@@ -10,8 +10,10 @@ import {
   startRecordingSession,
 } from '../data/recordingRepo';
 import { saveRecordedTrack, type RecordedTrack } from '../data/recordedTrack';
+import { useSettingsStore } from '../state/useSettingsStore';
 import { useTrackRecordingStore } from '../state/useTrackRecordingStore';
 import { TRACK_TASK_NAME } from './trackConfig';
+import { fixEveryM, type TransportId } from './transport';
 
 /**
  * Track recording that keeps going with the screen locked or the app closed (§7.5).
@@ -30,7 +32,6 @@ import { TRACK_TASK_NAME } from './trackConfig';
 const TASK_OPTIONS: LocationTaskOptions = {
   accuracy: Location.LocationAccuracy.BestForNavigation,
   timeInterval: 3000, // Android only
-  distanceInterval: 5,
   // iOS only: the blue "using your location" pill while backgrounded, no automatic pausing when the phone
   // thinks you've stopped (which would leave gaps at every rest), and a hint that this is a walk or hike.
   showsBackgroundLocationIndicator: true,
@@ -42,6 +43,15 @@ const TASK_OPTIONS: LocationTaskOptions = {
     notificationColor: '#2f6f4f',
   },
 };
+
+/**
+ * The location-task options for a recording. Fixes are only delivered every `fixEveryM(transport)` metres (5 m on
+ * foot and up to 25 m in a vehicle unless changed in Settings), which is what sets how many points a track has to
+ * store.
+ */
+function taskOptions(transport: TransportId | null): LocationTaskOptions {
+  return { ...TASK_OPTIONS, distanceInterval: fixEveryM(transport, useSettingsStore.getState().trackSpacingM) };
+}
 
 export type StartResult =
   | { ok: true }
@@ -104,7 +114,7 @@ async function stopUpdates(): Promise<void> {
 
 let starting = false;
 
-export async function startTrackRecording(db: SQLiteDatabase): Promise<StartResult> {
+export async function startTrackRecording(db: SQLiteDatabase, transport: TransportId | null = null): Promise<StartResult> {
   // A second tap while the permission prompts are up must not start a second recording over the first.
   if (starting || useTrackRecordingStore.getState().recording) return { ok: true };
   starting = true;
@@ -121,14 +131,14 @@ export async function startTrackRecording(db: SQLiteDatabase): Promise<StartResu
     await requestNotificationPermission();
 
     const startedAt = Date.now();
-    await startRecordingSession(db, startedAt);
+    await startRecordingSession(db, startedAt, transport);
     try {
-      await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, TASK_OPTIONS);
+      await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, taskOptions(transport));
     } catch (err) {
       await clearRecording(db);
       return { ok: false, reason: describeStartError(err) };
     }
-    useTrackRecordingStore.getState().begin(startedAt);
+    useTrackRecordingStore.getState().begin(startedAt, transport);
     void offerAlwaysPermission();
     return { ok: true };
   } finally {
@@ -157,7 +167,7 @@ async function ensureUpdatesRunning(): Promise<UpdatesState> {
   const store = useTrackRecordingStore.getState();
   try {
     const wasRunning = await Location.hasStartedLocationUpdatesAsync(TRACK_TASK_NAME);
-    if (!wasRunning) await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, TASK_OPTIONS);
+    if (!wasRunning) await Location.startLocationUpdatesAsync(TRACK_TASK_NAME, taskOptions(store.transport));
     store.setInterrupted(false);
     if (!wasRunning) store.setResumedAfterGap(true);
     return wasRunning ? 'running' : 'restarted';
@@ -185,7 +195,7 @@ export async function restoreRecording(db: SQLiteDatabase): Promise<void> {
     await syncRecording(db);
     return;
   }
-  store.hydrate(session.startedAt, await loadRecordingFixes(db));
+  store.hydrate(session.startedAt, await loadRecordingFixes(db), session.transport);
   await ensureUpdatesRunning();
 }
 
@@ -203,6 +213,7 @@ export async function finishTrackRecording(db: SQLiteDatabase): Promise<number |
       points: fixes.map((f) => [f.lon, f.lat]),
       samples: { times: fixes.map((f) => f.time), elevations: fixes.map((f) => f.altitude) },
       startedAt: session.startedAt,
+      transport: session.transport,
     };
     featureId = await saveRecordedTrack(db, track, { clearRecording: true });
   } else {

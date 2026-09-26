@@ -287,7 +287,8 @@ CREATE TABLE features (
   min_lon REAL, min_lat REAL, max_lon REAL, max_lat REAL,
   length_m REAL, area_m2 REAL, elevation_m REAL,
   source TEXT DEFAULT 'manual',  -- manual | imported | track
-  created_at INTEGER, updated_at INTEGER
+  created_at INTEGER, updated_at INTEGER,
+  transport TEXT                 -- how a track was travelled: foot | horse | bike | atv | vehicle | boat | other
 );
 
 CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, color TEXT);
@@ -300,11 +301,12 @@ CREATE TABLE feature_tags (
 CREATE TABLE photos (id INTEGER PRIMARY KEY, feature_id INTEGER REFERENCES features(id) ON DELETE CASCADE, path TEXT);
 
 -- The recording in progress (single row) and its fixes, written by the background location task:
-CREATE TABLE recording_session (id INTEGER PRIMARY KEY CHECK (id = 1), started_at INTEGER NOT NULL);
+CREATE TABLE recording_session (id INTEGER PRIMARY KEY CHECK (id = 1), started_at INTEGER NOT NULL, transport TEXT);
 CREATE TABLE recording_fixes (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, lon REAL NOT NULL, lat REAL NOT NULL, altitude REAL);
 
 -- Recorded/imported tracks: per-point time and altitude, index-aligned with the line's coordinates
--- (JSON: {"t": [epoch ms]|null, "e": [metres|null]|null}). Kept out of `geometry` so the line stays [lon, lat].
+-- (JSON: {"t0": first epoch ms, "dt": [ms after the previous fix], "e": [metres|null]|null}; rows from before v5 hold
+-- {"t": [epoch ms]|null, ...} and still read). Kept out of `geometry` so the line stays [lon, lat].
 CREATE TABLE track_data (feature_id INTEGER PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE, data TEXT NOT NULL);
 
 -- Offline coverage
@@ -366,6 +368,8 @@ Performance: enable clustering for points at low zoom. Thousands of items is fin
 ### 7.5 GPS tracks (Phase 5)
 Record a breadcrumb line with `expo-location`, save as a `line` with `source='track'`, and keep each fix's time and altitude in `track_data`.
 
+Starting a recording asks how you're getting around (foot, horse, bike, ATV / UTV, vehicle, boat, other). That is kept on the recording and the saved track (`transport`), editable afterwards, and exported as the GPX `<type>`. It also sets the GPS's minimum distance between fixes (5 m on foot up to 25 m in a vehicle), since a track's size is its point count: coordinates are stored to 6 decimals and times as deltas, and a further step, if tracks ever need to be smaller still, is simplifying on save (about 3 m tolerance keeps ~20% of the points, but needs to keep stops so moving time stays right).
+
 Recording runs in the background (screen locked, app closed) as an `expo-location` task under an Android foreground service with a visible notification. The task appends each fix to SQLite (`recording_session`, `recording_fixes`) so nothing depends on the app's JS being alive; the app mirrors that table into memory while open and saves the track from it. Started while the app is on screen, the service needs only the ordinary location permission (no "Allow all the time"); it needs `FOREGROUND_SERVICE_LOCATION` on Android 14+ and, to show the notification on Android 13+, `POST_NOTIFICATIONS`.
 
 On iOS the same task runs under the `location` background mode (`UIBackgroundModes`, via the expo-location plugin's `isIosBackgroundLocationEnabled`) with the blue status-bar indicator; "While Using" permission is enough to keep recording while backgrounded or locked, and "Always" (offered once recording has started) additionally lets the system relaunch a terminated app. A force-quit app is never relaunched, so a swipe-away ends the recording there; reopening restores the stored fixes, restarts updates and notes the gap.
@@ -373,6 +377,13 @@ On iOS the same task runs under the `location` background mode (`UIBackgroundMod
 While recording, a map button shows elapsed time and distance and opens a panel: live stats and charts, Delete, and End & save.
 
 Tapping a track opens its dashboard: distance, elapsed and moving time, average speed, climb/descent/high/low point, an elevation chart (against time or distance) and a distance-over-time chart, plus the usual name/folder/color/tags and a GPX export that carries `<time>` and `<ele>`. Imported GPX tracks that have timestamps or elevation get the same dashboard.
+
+### 7.6 Car screens (Android Auto)
+When a car connects, K-Maps shows a short list on the car's screen: **Record a track** (choose how you're getting around, which starts the recording) and, while recording, a live status row with **End & save**. It uses the same recording as the phone (`recording_session` / `recording_fixes` and the same store), so either screen can start or end it; naming and filing the track stays on the phone, where it is safe to type. Built on `@iternio/react-native-auto-play` (`src/car/`), Android only for now.
+
+It is a list app on purpose. Google lists the *navigation* category only for apps that give turn-by-turn directions (criterion NF-1 of the car app quality guidelines) and lets only those draw their own map; K-Maps declares the *points of interest* category instead (`plugins/withAutoPlay.js`), which uses templates. A map on the car screen would need real route guidance first, or would have to be sideloaded-only. Car screens refresh at most every few seconds, because hosts ignore faster template updates.
+
+CarPlay uses the same templates but needs Apple's CarPlay entitlement (requested from Apple, who decide the category) and Xcode 27 to build; see the README's known gaps.
 
 ---
 

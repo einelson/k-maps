@@ -43,11 +43,37 @@ describe('saveRecordedTrack', () => {
   });
 
   it('leaves neither the track nor its samples behind when the samples fail to save', async () => {
-    const circular: any = { times: [1, 2, 3], elevations: null };
-    circular.times.push(circular); // JSON.stringify throws
-    await expect(saveRecordedTrack(db, track({ samples: circular }))).rejects.toThrow();
+    const times = [1, 2, 3];
+    Object.defineProperty(times, 1, {
+      get() {
+        throw new Error('boom'); // reading the samples fails after the feature row is already inserted
+      },
+    });
+    await expect(saveRecordedTrack(db, track({ samples: { times, elevations: null } }))).rejects.toThrow('boom');
     expect(await db.getAllAsync('SELECT * FROM features')).toEqual([]);
     expect(await db.getAllAsync('SELECT * FROM track_data')).toEqual([]);
+  });
+});
+
+describe('saveRecordedTrack: transport and size', () => {
+  it('saves how the track was travelled on the feature', async () => {
+    const id = await saveRecordedTrack(db, track({ transport: 'horse' }));
+    expect((await db.getFirstAsync<{ transport: string | null }>('SELECT transport FROM features WHERE id = ?', id))!.transport).toBe('horse');
+  });
+
+  it('leaves it unset when none was chosen', async () => {
+    const id = await saveRecordedTrack(db, track());
+    expect((await db.getFirstAsync<{ transport: string | null }>('SELECT transport FROM features WHERE id = ?', id))!.transport).toBeNull();
+  });
+
+  it('stores coordinates to 6 decimals (about 11 cm), not the phone\'s full float precision', async () => {
+    const id = await saveRecordedTrack(
+      db,
+      track({ points: [[-116.20123456789012, 43.60123456789012], [-116.20223456789012, 43.60223456789012]], samples: { times: [1, 2], elevations: [1, 2] } })
+    );
+    const row = await db.getFirstAsync<{ geometry: string }>('SELECT geometry FROM features WHERE id = ?', id);
+    expect(JSON.parse(row!.geometry).coordinates).toEqual([[-116.201235, 43.601235], [-116.202235, 43.602235]]);
+    expect(row!.geometry).not.toContain('789012');
   });
 });
 

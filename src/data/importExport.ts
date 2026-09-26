@@ -181,6 +181,8 @@ export async function insertParsedImport(
             ? { type: 'Polygon', coordinates: [feature.geometry.coordinates] }
             : feature.geometry,
         source: 'imported',
+        // A way of getting around belongs to a line; a track turned into an area has none.
+        ...(feature.transport && !asArea ? { transport: feature.transport } : {}),
       });
       // Per-point time/elevation only fits a line; a track turned into an area has nothing to attach it to.
       if (feature.track && !asArea) await saveTrackData(db, featureId, feature.track);

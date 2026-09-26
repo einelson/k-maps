@@ -173,9 +173,13 @@ token they rely on; what's untested is how they look and behave on the phone.
   local and special-district land from USGS's PAD-US 4.1 feature service (state land is a big
   share of Idaho and would otherwise render as "likely private") — styled by `Pub_Access` per
   §6.3, tap-for-details card. Private/NGO conservation land is excluded and tribal land isn't
-  covered. Plus a BLM "private/unknown" cross-check overlay (§2) — both fetched for one starter
-  bbox by `tools/fetch_land.mjs` / `tools/fetch_blm_sma.mjs` and bundled as static assets, not
-  the full state-GDB pipeline in `tools/pad_us_to_mbtiles.sh`
+  covered
+- **BLM cross-check (private/unknown)** (§2) is BLM's "Private or Unknown" class drawn by BLM's own
+  server for every state: gray = classed private, purple = undetermined (much of the East is simply
+  undetermined, BLM's data is strongest in the West). It is a live raster like the land-manager layer,
+  so it is online-only, not tappable, and — because BLM's "LimitedScale" service draws nothing above
+  1:36,118 — it appears from about zoom 14. It isn't a vector pack: outside Alaska the class is a few
+  continent-sized polygons with a hole for every public parcel, too big to download per cell
 - MVUM forest roads/motorized trails overlay (USFS Enterprise Data Warehouse, same starter bbox,
   `tools/fetch_mvum.mjs`), colored by drivability: green = passenger cars (maintenance level 3+),
   orange = high-clearance (level 2), purple = OHV/motorcycle trails. Tap card shows the MVUM
@@ -230,12 +234,38 @@ token they rely on; what's untested is how they look and behave on the phone.
   panel that the line jumps across the gap. Denied permission with no way to re-prompt offers "Open
   Settings"; Location Services being off is reported up front. Fixes worse than 50 m accuracy are dropped
   (a cold GPS start otherwise draws a spike)
+- **How you're travelling.** Tapping Record track first asks: on foot, horse, bike, ATV / UTV, vehicle,
+  boat or other (`src/features/transport.ts`). The choice is stored with the recording (so it survives the
+  app being killed), saved on the track (`features.transport`), shown in the recording panel, editable
+  under "Travelled by" on the track's detail screen, and written to / read from GPX as `<type>`
+  ("hiking", "horseback riding", "cycling", "driving" ...; other apps' words for the same are recognised).
+  It also sets how often the GPS is asked for a fix — by default every 5 m on foot, 10 m horse/bike, 15 m
+  ATV, 25 m vehicle/boat — because the number of points is most of what a track weighs. Each is adjustable
+  under **Settings → Track recording** (a − / + stepper per mode in feet or metres, with the points per
+  mile/km it works out to and a reset button); it applies to the next recording you start
+- **Track size.** Coordinates are stored to 6 decimals (about 11 cm) and each point's time as milliseconds
+  after the previous one instead of a 13-digit timestamp (lossless; rows in the old format still read).
+  Together with the per-mode spacing, a recorded track is roughly 40% smaller on foot, 70% on a horse and
+  almost 90% in a vehicle than the fixed 5 m / full-precision format it replaced (measured on simulated
+  tracks: a 10 km hike is ~70 KB, a 150 km drive ~200 KB)
 - **Recording button + panel.** While recording, a "● 12:34 · 1.23 mi" button sits on the map under the
   locate button. Tapping it (or "Track stats" in the "+" menu) opens a panel with the live clock and
   distance, the same stats and charts a saved track shows, and **Delete** (asks first) and **End & save**.
   Ending saves the track from the database, clears the recording only once it's safely saved, and opens
   the track's dashboard so the name, folder, color and tags are one tap away. A track is stored as a line
   with `source='track'` plus each point's time and altitude in `track_data`
+- **Android Auto** (`src/car/`, built on `@iternio/react-native-auto-play`). When a car connects, K-Maps shows a
+  list screen: **Record a track** (pick foot / horse / bike / ATV / vehicle / boat / other, which starts the
+  recording at that mode's GPS spacing) and, while recording, a live "Recording · Vehicle — 12:34 · 1.2 mi" row
+  with **End & save**; naming and filing the track stays on the phone. It shares the phone's recording (same
+  SQLite tables and store), so a track can be started on either screen and seen on both. It is a list app, not
+  a map: Google only lists the *navigation* category for apps with turn-by-turn directions (criterion NF-1 of
+  the car app quality guidelines), which K-Maps doesn't have, so it declares itself a *points of interest* app,
+  and those draw templates rather than their own map. `plugins/withAutoPlay.js` (a config plugin) sets that
+  category, so `expo prebuild` reproduces it, and removes the `RECORD_AUDIO` permission the library declares for
+  voice input. The library is Android-only here (`react-native.config.js` keeps it out of iOS builds; the JS
+  side is gated on `Platform.OS`), and it replaces the global timers so the clock keeps ticking while the phone
+  is locked (`src/car/installCarTimers.ts` must stay `index.ts`'s first import)
 - **Track dashboard** (`FeatureDetailScreen`, shown for recorded tracks and for GPX tracks that carry
   timestamps/elevation): distance, time, moving time (stretches under 0.5 m/s don't count), average
   speed, climb, descent, high and low point; an elevation chart (switch its x axis between time and
@@ -277,13 +307,25 @@ token they rely on; what's untested is how they look and behave on the phone.
   downloader with resume (§4) — writes real files, but see the device-testing caveat above. The
   Downloads map now draws the cell grid state (selected / downloaded / partial), and max zoom is
   capped at z16 because USGS returns 404 for every tile past it (§12.3, probed)
-- Laptop-side pipeline scripts: PAD-US/BLM/OSM-POI fetch-and-clip (`tools/fetch_*.mjs`, hit real
+- Laptop-side pipeline scripts: PAD-US/OSM-POI fetch-and-clip (`tools/fetch_*.mjs`, hit real
   APIs), plus the original full-pipeline scripts for PAD-US GDB → MBTiles and Protomaps → MBTiles
   (`tools/pad_us_to_mbtiles.sh`, `tools/osm_extract.sh`)
 
 **Not implemented / known gaps:**
 
-- BLM "private/unknown" cross-check is bundled for the starter region only (not downloadable)
+- Android Auto has only been built and unit-tested, not run on a head unit or the Desktop Head Unit yet. The
+  main unknown is whether Android lets the recording's foreground service start when only the car is showing
+  K-Maps; if it doesn't, the car shows a message asking you to start the recording on the phone. To try it: build
+  a dev client, turn on Android Auto's developer settings (tap its version 10 times) and "Unknown sources", then
+  connect to a car or run the Desktop Head Unit (`adb forward tcp:5277 tcp:5277`, "Start head unit server")
+- CarPlay isn't set up. It needs (1) Apple's CarPlay entitlement, requested from Apple: the navigation category
+  wants turn-by-turn directions, "driving task" is the closest fit for recording, and Apple decides; (2) a Mac
+  with Xcode 27 (the iOS 27 SDK), which the car library needs just to compile; (3) the iOS native setup from the
+  library's README (entitlements file, CarPlay scenes in Info.plist, the AppDelegate hook); and (4) dropping the
+  iOS override in `react-native.config.js` and the `Platform.OS` checks in `src/car/`. The car screens
+  themselves are cross-platform templates, so they are shared as they are
+- The BLM "private/unknown" cross-check is online-only (a live raster from BLM's server), starts at zoom 14 (the
+  service draws nothing coarser), and can't be tapped for details
 - The US limits use 1:500,000 boundaries, so the border and shoreline in "likely private" and in OSM / POI are good
   to about 250 m (Chesapeake Bay and some other bays count as US land, as in the Census file). Territories (Puerto
   Rico, Guam, ...) are not covered
@@ -318,6 +360,7 @@ token they rely on; what's untested is how they look and behave on the phone.
   terminates the app"; a foreground service normally prevents that, but Samsung's battery manager can still
   kill it — set K-Maps to "Unrestricted" battery use). Nothing already recorded is lost either way: it's in
   SQLite and reopening the app picks it up, but there would be a gap
+- **Everything iOS (what's never been run, what's blocked on Apple or a Mac, CarPlay) is tracked in `ios_todo.md`.**
 - iOS recording is configured but has never run on an iPhone (nothing here can build for iOS; only the
   generated Info.plist was checked: `UIBackgroundModes` has `location`). How it's meant to behave: the
   `location` background mode keeps a backgrounded, screen-locked app receiving fixes (blue status-bar
@@ -371,7 +414,6 @@ app runs on-device (`src/packs/`). To refresh it, or debug a pack for any bbox:
 
 ```bash
 node tools/build_starter_pack.mjs            # land, mvum, poi (all) or one: ... land
-node tools/fetch_blm_sma.mjs                 # BLM private/unknown cross-check
 node tools/build_hunt_units.mjs --check      # dry run of every state's hunt units: counts, samples, link check
 node tools/fetch_pack.mjs osm -116.3 43.6 -116.1 43.7 out.json   # any cell pack (land|mvum|trails|poi|osm), any bbox
 node tools/build_glyphs.mjs                  # regenerate the bundled label glyphs

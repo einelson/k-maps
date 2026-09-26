@@ -17,6 +17,8 @@ function fakeAt(version: number) {
   const executed: string[] = [];
   const db = {
     getFirstAsync: async () => ({ user_version: version }),
+    // Every table already has its transport column, so the guarded ALTERs are skipped.
+    getAllAsync: async () => [{ name: 'transport' }],
     execAsync: async (sql: string) => void executed.push(sql),
   } as unknown as SQLiteDatabase;
   return { db, executed };
@@ -73,6 +75,27 @@ describe('migrateDbIfNeeded', () => {
     await migrateDbIfNeeded(db);
     expect(await tableExists(db, 'recording_session')).toBe(true);
     expect(await userVersion(db)).toBe(SCHEMA_VERSION);
+  });
+
+  it('adds the transport columns to a real v4 database, keeping its rows', async () => {
+    const db = createTestDb();
+    // What a v4 install looks like: the tables exist without a transport column.
+    await db.execAsync('ALTER TABLE features DROP COLUMN transport; ALTER TABLE recording_session DROP COLUMN transport; PRAGMA user_version = 4;');
+    await db.runAsync("INSERT INTO features (type, name, geometry) VALUES ('line', 'old track', '{}')");
+    await db.runAsync('INSERT INTO recording_session (id, started_at) VALUES (1, 5000)');
+
+    await migrateDbIfNeeded(db);
+
+    expect(await userVersion(db)).toBe(SCHEMA_VERSION);
+    expect(await db.getFirstAsync('SELECT name, transport FROM features')).toEqual({ name: 'old track', transport: null });
+    expect(await db.getFirstAsync('SELECT started_at, transport FROM recording_session')).toEqual({ started_at: 5000, transport: null });
+  });
+
+  it('does not add a column twice when an older database already got it from CREATE TABLE IF NOT EXISTS', async () => {
+    const db = createTestDb(); // recording_session is created with the column, as it is for a v2/v3 upgrade
+    await db.execAsync('ALTER TABLE features DROP COLUMN transport; PRAGMA user_version = 2;');
+    await expect(migrateDbIfNeeded(db)).resolves.toBeUndefined();
+    expect(await db.getFirstAsync('SELECT transport FROM features')).toBeNull(); // column exists, no rows
   });
 
   it('is safe to run twice', async () => {

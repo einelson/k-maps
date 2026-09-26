@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import type { Position } from 'geojson';
 
 import type { TrackSamples } from '../features/trackStats';
+import type { TransportId } from '../features/transport';
 import { createFeature } from './featuresRepo';
 import { clearRecordingRows } from './recordingRepo';
 import { saveTrackData } from './trackDataRepo';
@@ -11,7 +12,12 @@ export interface RecordedTrack {
   points: Position[];
   samples: TrackSamples;
   startedAt: number | null;
+  transport?: TransportId | null;
 }
+
+/** A millionth of a degree is about 11 cm, far below what a phone's GPS can resolve, and it drops ~9 characters from every stored point. */
+const COORDINATE_DECIMALS = 6;
+const roundCoordinate = (value: number): number => Number(value.toFixed(COORDINATE_DECIMALS));
 
 /** "Track 9/24/2026, 5:02:03 PM": named for when it started, so a list of tracks sorts itself out. */
 export function defaultTrackName(startedAt: number | null): string {
@@ -34,8 +40,9 @@ export async function saveRecordedTrack(
   await db.withTransactionAsync(async () => {
     featureId = await createFeature(db, {
       name: defaultTrackName(track.startedAt),
-      geometry: { type: 'LineString', coordinates: track.points },
+      geometry: { type: 'LineString', coordinates: track.points.map(([lon, lat]) => [roundCoordinate(lon), roundCoordinate(lat)]) },
       source: 'track',
+      transport: track.transport ?? null,
     });
     await saveTrackData(db, featureId, track.samples);
     if (options.clearRecording) await clearRecordingRows(db);

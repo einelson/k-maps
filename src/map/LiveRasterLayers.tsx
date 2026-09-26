@@ -6,7 +6,7 @@ import { LIVE_RASTERS, liveRasterTiles, refreshBucket, type LiveRasterDef, type 
 import { PACK_ANCHORS } from './PackLayers';
 
 /** Bottom -> top. Land managers are opaque pastel fills, so they sit lowest; water linework sits on top. */
-const STATIC_ORDER: LiveRasterId[] = ['landManager', 'slopeAngle', 'wetlands', 'nhd'];
+const STATIC_ORDER: LiveRasterId[] = ['landManager', 'blmSma', 'slopeAngle', 'wetlands', 'nhd'];
 
 interface LiveRasterLayersProps {
   visibility: Record<LiveRasterId, boolean>;

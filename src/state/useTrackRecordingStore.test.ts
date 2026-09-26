@@ -22,6 +22,20 @@ describe('useTrackRecordingStore', () => {
     expect(store()).toMatchObject({ recording: true, startedAt: 5000, points: [], distanceM: 0 });
   });
 
+  it('remembers how the track is being travelled, from begin and from hydrate', () => {
+    store().begin(5000, 'vehicle');
+    expect(store().transport).toBe('vehicle');
+    store().reset();
+    expect(store().transport).toBeNull();
+    store().hydrate(5000, [fix(1, 43)], 'horse');
+    expect(store().transport).toBe('horse');
+  });
+
+  it('has no mode when none is given', () => {
+    store().begin(5000);
+    expect(store().transport).toBeNull();
+  });
+
   it('appends fixes in step, accumulating distance from the previous fix', () => {
     store().begin(0);
     store().appendFixes([fix(1, 43), fix(2, 43.001, { altitude: null })]);

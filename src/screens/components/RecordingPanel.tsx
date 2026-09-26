@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { formatDistance, formatDuration } from '../../features/formatUnits';
 import type { TrackSamples } from '../../features/trackStats';
+import { transportLabel } from '../../features/transport';
 import { useSettingsStore } from '../../state/useSettingsStore';
 import { useTrackRecordingStore } from '../../state/useTrackRecordingStore';
 import { Text, useThemedStyles, type ThemeColors } from '../../theme';
@@ -30,6 +31,7 @@ export function RecordingPanel({ visible, onClose, onEnd, onDelete, busy = false
   const styles = useThemedStyles(makeStyles);
   const units = useSettingsStore((s) => s.units);
   const startedAt = useTrackRecordingStore((s) => s.startedAt);
+  const transport = useTrackRecordingStore((s) => s.transport);
   const points = useTrackRecordingStore((s) => s.points);
   const times = useTrackRecordingStore((s) => s.times);
   const altitudes = useTrackRecordingStore((s) => s.altitudes);
@@ -55,7 +57,10 @@ export function RecordingPanel({ visible, onClose, onEnd, onDelete, busy = false
     <BottomSheet visible={visible} onClose={onClose} maxHeight="88%">
       <View style={styles.header}>
         <View style={[styles.dot, interrupted && styles.dotStopped]} />
-        <Text style={styles.title}>{interrupted ? 'Recording stopped' : 'Recording track'}</Text>
+        <Text style={styles.title}>
+          {interrupted ? 'Recording stopped' : 'Recording track'}
+          {transportLabel(transport) ? ` · ${transportLabel(transport)}` : ''}
+        </Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>

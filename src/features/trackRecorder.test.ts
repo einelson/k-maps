@@ -9,6 +9,7 @@ import {
   loadRecordingFixes,
   startRecordingSession,
 } from '../data/recordingRepo';
+import { useSettingsStore } from '../state/useSettingsStore';
 import { useTrackRecordingStore } from '../state/useTrackRecordingStore';
 import { createTestDb } from '../testing/sqliteTestDb';
 import { TRACK_TASK_NAME } from './trackConfig';
@@ -53,6 +54,7 @@ const fix = (time: number, lon = -116, lat = 43, altitude: number | null = 1500)
 beforeEach(() => {
   db = createTestDb();
   useTrackRecordingStore.getState().reset();
+  useSettingsStore.getState().resetTrackSpacing();
   requestPermission.mockReset().mockResolvedValue({ status: 'granted' });
   startUpdates.mockReset().mockResolvedValue(undefined);
   stopUpdates.mockReset().mockResolvedValue(undefined);
@@ -101,7 +103,7 @@ describe('startTrackRecording', () => {
 
   it('opens a session, starts the foreground-service location task, and begins the live mirror', async () => {
     await expect(startTrackRecording(db)).resolves.toEqual({ ok: true });
-    expect(await getRecordingSession(db)).toEqual({ startedAt: expect.any(Number) });
+    expect(await getRecordingSession(db)).toEqual({ startedAt: expect.any(Number), transport: null });
     expect(store().recording).toBe(true);
     expect(store().startedAt).toBe((await getRecordingSession(db))!.startedAt);
 
@@ -111,6 +113,27 @@ describe('startTrackRecording', () => {
     expect(options.foregroundService.killServiceOnDestroy).toBeUndefined(); // it must outlive the app being closed
     expect(options.timeInterval).toBe(3000);
     expect(options.distanceInterval).toBe(5);
+  });
+
+  it('asks the GPS for a fix every 5 m on foot, but every 25 m in a vehicle, and remembers the mode', async () => {
+    await startTrackRecording(db, 'foot');
+    expect(startUpdates.mock.calls[0][1].distanceInterval).toBe(5);
+    await discardTrackRecording(db);
+
+    await startTrackRecording(db, 'vehicle');
+    expect(startUpdates.mock.calls[1][1].distanceInterval).toBe(25);
+    expect(store().transport).toBe('vehicle');
+    expect(await getRecordingSession(db)).toEqual({ startedAt: expect.any(Number), transport: 'vehicle' });
+  });
+
+  it('uses the spacing set in Settings for the chosen mode', async () => {
+    useSettingsStore.getState().setTrackSpacing('foot', 2);
+    useSettingsStore.getState().setTrackSpacing('horse', 40);
+    await startTrackRecording(db, 'foot');
+    expect(startUpdates.mock.calls[0][1].distanceInterval).toBe(2);
+    await discardTrackRecording(db);
+    await startTrackRecording(db, 'horse');
+    expect(startUpdates.mock.calls[1][1].distanceInterval).toBe(40);
   });
 
   it('configures the iOS side: blue pill, no automatic pausing, fitness activity', async () => {
@@ -300,6 +323,14 @@ describe('restoreRecording', () => {
     expect(store().resumedAfterGap).toBe(true); // there was a stretch with nothing recorded
   });
 
+  it('brings back the mode, and restarts a killed service at that mode\'s spacing', async () => {
+    await startRecordingSession(db, 5000, 'atv');
+    hasStarted.mockResolvedValue(false);
+    await restoreRecording(db);
+    expect(store().transport).toBe('atv');
+    expect(startUpdates.mock.calls[0][1].distanceInterval).toBe(15);
+  });
+
   it('does not flag a gap when the service was still running', async () => {
     await startRecordingSession(db, 5000);
     await restoreRecording(db);
@@ -349,6 +380,13 @@ describe('finishTrackRecording', () => {
     expect(await loadRecordingFixes(db)).toEqual([]);
     expect(stopUpdates).toHaveBeenCalledWith(TRACK_TASK_NAME);
     expect(store().recording).toBe(false);
+  });
+
+  it('saves the track with the mode it was recorded with', async () => {
+    await startTrackRecording(db, 'horse');
+    await appendRecordingFixes(db, [fix(1000), fix(4000, -116.001)]);
+    const id = await finishTrackRecording(db);
+    expect((await db.getFirstAsync<{ transport: string | null }>('SELECT transport FROM features WHERE id = ?', id))!.transport).toBe('horse');
   });
 
   it('saves from the database, so fixes the app never mirrored (recorded while closed) are included', async () => {

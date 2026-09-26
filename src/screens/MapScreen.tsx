@@ -16,6 +16,7 @@ import { computeGeometryMetrics } from '../features/measure';
 import { DEFAULT_PIN_COLOR, DEFAULT_PIN_STYLE } from '../features/pinStyles';
 import { canRemoveVertex, geometryToVertices, verticesToGeometry } from '../features/vertexEdit';
 import { discardTrackRecording, finishTrackRecording, startTrackRecording } from '../features/trackRecorder';
+import type { TransportId } from '../features/transport';
 import { EditLayers } from '../map/EditLayers';
 import { MapScreenMap } from '../map/MapView';
 import { PinDraftLayers } from '../map/PinLayers';
@@ -40,6 +41,7 @@ import { MAP_BUTTON_SIZE, MapButton } from './components/MapButton';
 import { PinCard, type PinDraft } from './components/PinCard';
 import { RecordingButton } from './components/RecordingButton';
 import { RecordingPanel } from './components/RecordingPanel';
+import { TransportSheet } from './components/TransportPicker';
 
 /** Which floating panel is open over the map. Only one at a time. */
 type Panel = 'none' | 'layers' | 'add';
@@ -128,6 +130,7 @@ export function MapScreen() {
   const setShowUserLocation = useLayersStore((s) => s.setShowUserLocation);
   const trackRecording = useTrackRecordingStore((s) => s.recording);
   const [recordingPanelOpen, setRecordingPanelOpen] = useState(false);
+  const [transportSheetOpen, setTransportSheetOpen] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const trackPoints = useTrackRecordingStore((s) => s.points);
   const showLabels = useLayersStore((s) => s.showLabels);
@@ -365,7 +368,13 @@ export function MapScreen() {
       setRecordingPanelOpen(true);
       return;
     }
-    const result = await startTrackRecording(db);
+    // How you're travelling is chosen first: it sets how often the GPS is sampled, which can't change mid-recording.
+    setTransportSheetOpen(true);
+  }
+
+  async function handleStartRecording(transport: TransportId) {
+    setTransportSheetOpen(false);
+    const result = await startTrackRecording(db, transport);
     if (!result.ok) {
       Alert.alert(
         'Cannot record track',
@@ -616,6 +625,12 @@ export function MapScreen() {
             saving={savingPin}
           />
         )}
+
+        <TransportSheet
+          visible={transportSheetOpen}
+          onClose={() => setTransportSheetOpen(false)}
+          onSelect={handleStartRecording}
+        />
 
         <RecordingPanel
           visible={trackRecording && recordingPanelOpen}
