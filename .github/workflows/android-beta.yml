@@ -80,7 +80,9 @@ jobs:
         env:
           NODE_ENV: production
         run: |
-          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          # The generated gradle.properties has no trailing newline: a bare `echo >>` would glue this onto the last
+          # property (expo.inlineModules.watchedDirectories) and break Expo's autolinking, so start on a fresh line.
+          printf '\norg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g\n' >> gradle.properties
           ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
 
       - name: Name the APK
